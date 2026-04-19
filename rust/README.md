@@ -2,18 +2,26 @@
 
 Rust bindings for [gdstk](https://github.com/heitzmann/gdstk) via the `cxx` crate.
 
-**Estado:** Fase 2 — **completada 2026-04-19**.
+**Estado:** Fase 4 — **completada 2026-04-19**.
 
 Expone:
-- `Library::open(path)` — parseo GDSII
+- `Library::open(path)` / `Library::find_cell(name)` — parseo + lookup
 - `Library::cells()` / `Library::cell(idx)` / `Library::cell_count()`
-- `Cell::name()` / `Cell::polygons()` / `Cell::polygon_count()`
-- `Polygon::area()` / `Polygon::layer()` / `Polygon::datatype()` / `Polygon::bbox()` / `Polygon::point_count()`
-- `BoundingBox` (shared POD struct)
+- `Cell::name()` / `Cell::polygons()` / `Cell::labels()` / `Cell::references()` / counts
+- `Cell::xor_with(other, layer) -> XorMetrics` — **diff geométrico vía boolean XOR**
+- `Polygon::area()` / `layer()` / `datatype()` / `bbox()` / `point_count()`
+- `Label::text()` (Cow<str> UTF-8 lossy) / `layer()` / `texttype()` / `origin()`
+  / `anchor()` / `rotation()` / `magnification()` / `x_reflection()`
+- `Reference::cell_name()` / `origin()` / `rotation()` / `magnification()` /
+  `x_reflection()`
+- Shared POD structs: `BoundingBox`, `Point2D`, `XorMetrics`
+- Enum `Anchor` (NW/N/NE/W/O/E/SW/S/SE con valores sparse de gdstk)
 
-Paridad verificada con Python gdstk vía `examples/list_polygons.{rs,py}`:
-ambos producen exactamente el mismo output (área por capa por celda) para
-`proof_lib.gds` y `tinytapeout.gds` (diff vacío al normalizar CRLF→LF).
+Paridad verificada contra Python gdstk:
+- `list_polygons`, `list_labels`, `list_references`: diff byte-a-byte (post-CRLF)
+- `diff_gds`: XOR numérico idéntico en pruebas sintéticas
+  (rectángulo 5×3 agregado → detectado como 15.00 µm² en 1 región)
+- Invariante: `diff_gds a.gds a.gds` reporta 0 cambios
 
 El plan completo vive en `../research/arquitectura/gdstk_rust_bindings_migracion.md`.
 

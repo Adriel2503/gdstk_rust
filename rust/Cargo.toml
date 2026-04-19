@@ -34,3 +34,15 @@ path = "examples/count_many_parallel.rs"
 [[example]]
 name = "list_polygons"
 path = "examples/list_polygons.rs"
+
+[[example]]
+name = "list_labels"
+path = "examples/list_labels.rs"
+
+[[example]]
+name = "list_references"
+path = "examples/list_references.rs"
+
+[[example]]
+name = "diff_gds"
+path = "examples/diff_gds.rs"
