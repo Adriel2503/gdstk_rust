@@ -2,9 +2,19 @@
 
 Rust bindings for [gdstk](https://github.com/heitzmann/gdstk) via the `cxx` crate.
 
-**Estado:** Fase 1 (Proof of Concept) — **completada 2026-04-19**.
-Expone `read_gds` y conteo de celdas. Paridad verificada con Python gdstk
-(`proof_lib.gds`: 6 celdas, `tinytapeout.gds`: 24 celdas).
+**Estado:** Fase 2 — **completada 2026-04-19**.
+
+Expone:
+- `Library::open(path)` — parseo GDSII
+- `Library::cells()` / `Library::cell(idx)` / `Library::cell_count()`
+- `Cell::name()` / `Cell::polygons()` / `Cell::polygon_count()`
+- `Polygon::area()` / `Polygon::layer()` / `Polygon::datatype()` / `Polygon::bbox()` / `Polygon::point_count()`
+- `BoundingBox` (shared POD struct)
+
+Paridad verificada con Python gdstk vía `examples/list_polygons.{rs,py}`:
+ambos producen exactamente el mismo output (área por capa por celda) para
+`proof_lib.gds` y `tinytapeout.gds` (diff vacío al normalizar CRLF→LF).
+
 El plan completo vive en `../research/arquitectura/gdstk_rust_bindings_migracion.md`.
 
 ## Prerequisitos (Windows)
