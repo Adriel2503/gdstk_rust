@@ -2,18 +2,45 @@
 
 Rust bindings for [gdstk](https://github.com/heitzmann/gdstk) via the `cxx` crate.
 
-**Estado:** Fase 4 — **completada 2026-04-19**.
+**Estado:** Fase 8.5 — **completada 2026-04-19**. Bindings Rust con `Repetition` completo (kind + columns/rows/spacing/v1/v2/coords).
 
 Expone:
 - `Library::open(path)` / `Library::find_cell(name)` — parseo + lookup
+- `Library::name()` / `unit()` / `precision()` — metadata GDSII
+- `Library::write_gds(path) -> Result<(), Error>` — escribir GDS
+- `Library::top_level() -> TopLevel<'_>` — cells top-level
+- `gds_info(path) -> Result<GdsInfo, Error>` — peek rápido de metadata sin
+  full parse (~1.5-2× más rápido que `Library::open`)
+- `GdsInfo::{unit, precision, num_polygons, num_paths, num_references,
+  num_labels, cell_names, shape_tags, label_tags}` — counts y tags sin parsear
+- `Error` / `ErrorCode` — error handling idiomático Rust
 - `Library::cells()` / `Library::cell(idx)` / `Library::cell_count()`
-- `Cell::name()` / `Cell::polygons()` / `Cell::labels()` / `Cell::references()` / counts
-- `Cell::xor_with(other, layer) -> XorMetrics` — **diff geométrico vía boolean XOR**
-- `Polygon::area()` / `layer()` / `datatype()` / `bbox()` / `point_count()`
+- `Cell::name()` / `Cell::polygons()` / `Cell::labels()` / `Cell::references()` /
+  `Cell::flexpaths()` / `Cell::robustpaths()` / counts
+- `Cell::xor_with(other, layer) -> XorMetrics` — **diff geométrico completo**
+  (incluye polygons + paths convertidos a polygons; correcto para GDS reales)
+- `Cell::xor_with_polygons_only(other, layer)` — XOR legacy solo de polygons
+- `Polygon::area()` / `layer()` / `datatype()` / `bbox()` / `point_count()` /
+  `perimeter()` / `signed_area()` / `repetition_count()` / `repetition_offsets()`
+- `Cell::bbox()` — bounding box de toda la celda
+- `Reference::bbox()` — bbox con transformaciones aplicadas
+- `Library::rawcells()` / `rawcell_count()` — iterar RawCells (librerías externas
+  pre-compiladas)
+- `RawCell::name()` / `size()` / `dependencies()`
 - `Label::text()` (Cow<str> UTF-8 lossy) / `layer()` / `texttype()` / `origin()`
   / `anchor()` / `rotation()` / `magnification()` / `x_reflection()`
 - `Reference::cell_name()` / `origin()` / `rotation()` / `magnification()` /
   `x_reflection()`
+- `FlexPath::num_elements()` / `element_layer(i)` / `element_datatype(i)` /
+  `spine_point_count()` / `spine_point(i)` / `element_half_width(e, s)` /
+  `element_offset(e, s)` / `element_end_type(e)` / `element_join_type(e)` /
+  `element_bend_type(e)` / `element_bend_radius(e)` / `element_end_extensions(e)` /
+  `simple_path()` / `scale_width()`
+- `RobustPath::num_elements()` / `element_layer(i)` / `element_datatype(i)` /
+  `subpath_count()` / `end_point()` / `tolerance()` / `max_evals()` /
+  `element_end_width(e)` / `element_end_offset(e)` / `element_end_type(e)` /
+  `simple_path()` / `scale_width()`
+- Enums `EndType`, `JoinType`, `BendType` (valores contiguos matching gdstk)
 - Shared POD structs: `BoundingBox`, `Point2D`, `XorMetrics`
 - Enum `Anchor` (NW/N/NE/W/O/E/SW/S/SE con valores sparse de gdstk)
 
@@ -73,6 +100,37 @@ print(len(gdstk.read_gds("file.gds").cells))
 
 Nota: en una versión futura, `build.rs` copiará las DLLs automáticamente o
 evaluaremos el triplet `x64-windows-static` para eliminar la dependencia runtime.
+
+## Testing
+
+```powershell
+$env:VCPKG_ROOT = "C:\vcpkg"
+
+# Tests de integración (16 tests, ~0.5 s)
+cargo test --release
+
+# Benchmarks estadísticos con criterion
+cargo bench
+
+# Flujo completo (build + test + snapshots)
+./run_tests.sh
+
+# Flujo completo + benchmarks
+RUN_BENCH=1 ./run_tests.sh
+
+# Regenerar snapshots cuando el output cambia intencionalmente
+REGENERATE_SNAPSHOTS=1 cargo test --release
+```
+
+Los tests usan `proof_lib.gds` (incluido en gdstk/tests/). Algunos tests
+opcionales requieren `tinytapeout.gds` del repo `tinytapeout_gds_viewer/`
+— se saltan si no está presente.
+
+**Benchmarks de referencia** (proof_lib.gds, i7-8th gen):
+- `read_gds`: ~125 µs
+- `gds_info`: ~85 µs (1.5× más rápido que read_gds)
+- `cell_xor_with`: ~73 µs
+- `iterate_polygons`: ~10 µs
 
 ## Arquitectura
 

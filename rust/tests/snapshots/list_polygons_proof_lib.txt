@@ -1,0 +1,36 @@
+Cell 'Polygon.fillet':
+  Layer 0: 2.92
+Cell 'FlexPath:scale_width_True':
+  Layer 0: 0.92
+  Layer 1: 0.92
+  Layer 2: 0.92
+  Layer 3: 3.67
+  Layer 4: 3.67
+  Layer 5: 0.92
+Cell 'FlexPath:scale_width_False':
+  Layer 0: 0.92
+  Layer 1: 0.92
+  Layer 2: 0.92
+  Layer 3: 1.83
+  Layer 4: 1.83
+  Layer 5: 0.92
+Cell 'RobustPath:scale_width_True':
+  Layer 0: 0.92
+  Layer 1: 0.92
+  Layer 2: 0.92
+  Layer 3: 3.67
+  Layer 4: 3.67
+  Layer 5: 0.92
+Cell 'RobustPath:scale_width_False':
+  Layer 0: 0.92
+  Layer 1: 0.92
+  Layer 2: 0.92
+  Layer 3: 1.83
+  Layer 4: 1.83
+  Layer 5: 0.92
+Cell 'Cell.copy':
+  Layer 0: 232.42
+  Layer 1: 78.12
+  Layer 2: 8.00
+  Layer 3: 53.32
+  Layer 4: 138.20
