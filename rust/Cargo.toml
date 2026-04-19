@@ -1,0 +1,32 @@
+[package]
+name = "gdstk-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Rust bindings for gdstk (GDSII/OASIS layout library) via cxx"
+license = "BSL-1.0"
+
+[lib]
+name = "gdstk_rs"
+path = "src/lib.rs"
+
+[dependencies]
+cxx = "1.0.194"
+
+[build-dependencies]
+cxx-build = "1.0.194"
+
+[[example]]
+name = "count_cells"
+path = "examples/count_cells.rs"
+
+[[example]]
+name = "count_many"
+path = "examples/count_many.rs"
+
+[[example]]
+name = "count_many_fair"
+path = "examples/count_many_fair.rs"
+
+[[example]]
+name = "count_many_parallel"
+path = "examples/count_many_parallel.rs"
