@@ -180,9 +180,8 @@ fn resolve_zlib() -> NativeDeps {
         return NativeDeps::from_vcpkg(
             "x64-windows",
             "zlib",
-            "zlib.lib",
             "zlib",
-            zlib_link_name(),
+            &["zlib", "zlibstatic"],
             "install `zlib` in vcpkg (for example: `vcpkg install zlib --triplet x64-windows`)",
         );
     }
@@ -214,9 +213,8 @@ fn resolve_qhull() -> NativeDeps {
         return NativeDeps::from_vcpkg(
             "x64-windows",
             "qhull_r",
-            "qhull_r.lib",
             "qhull",
-            "qhull_r",
+            &["qhull_r", "qhullstatic_r"],
             "install `qhull` in vcpkg (for example: `vcpkg install qhull --triplet x64-windows`)",
         );
     }
@@ -227,14 +225,6 @@ fn resolve_qhull() -> NativeDeps {
         "QHULL_DIR",
         "a qhull development package (for example: `libqhull-dev`, `qhull-devel`, `qhull`, or Homebrew `qhull`)",
     )
-}
-
-fn zlib_link_name() -> &'static str {
-    if cfg!(target_env = "msvc") {
-        "zlib"
-    } else {
-        "z"
-    }
 }
 
 fn ensure_pkg_config_available() {
@@ -254,6 +244,14 @@ fn ensure_pkg_config_available() {
                 "Could not run `pkg-config --version`. Install `pkg-config` first so Rust can resolve zlib and qhull ({err})."
             );
         }
+    }
+}
+
+fn zlib_link_name() -> &'static str {
+    if cfg!(target_env = "msvc") {
+        "zlib"
+    } else {
+        "z"
     }
 }
 
@@ -339,9 +337,8 @@ impl NativeDeps {
     fn from_vcpkg(
         triplet: &str,
         package: &str,
-        expected_lib: &str,
         dep_name: &str,
-        link_lib: &str,
+        expected_lib_candidates: &[&str],
         install_hint: &str,
     ) -> Self {
         let vcpkg_root = env::var("VCPKG_ROOT").unwrap_or_else(|_| {
@@ -358,6 +355,33 @@ impl NativeDeps {
                 prefix.display(),
             );
         }
-        Self::from_prefix(prefix, dep_name, link_lib, install_hint, Some(expected_lib))
+        let lib_dir = prefix.join("lib");
+        for expected_lib in expected_lib_candidates {
+            let expected_lib_name = if expected_lib.ends_with(".lib") {
+                expected_lib.to_string()
+            } else {
+                format!("{expected_lib}.lib")
+            };
+            if lib_dir.join(&expected_lib_name).exists() {
+                let link_lib = expected_lib_name.trim_end_matches(".lib");
+                return Self::from_prefix(
+                    prefix,
+                    dep_name,
+                    link_lib,
+                    install_hint,
+                    Some(&expected_lib_name),
+                );
+            }
+        }
+
+        let expected_list = expected_lib_candidates
+            .iter()
+            .map(|name| format!("`{name}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        panic!(
+            "Could not find any of {expected_list} in `{}` for {dep_name}. Install {install_hint}.",
+            lib_dir.display(),
+        );
     }
 }
