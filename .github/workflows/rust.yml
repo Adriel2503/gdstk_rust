@@ -42,12 +42,14 @@ jobs:
 
       - name: Build examples
         run: cargo build --release --examples
+        working-directory: rust
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
           VCPKG_DEFAULT_TRIPLET: x64-windows-static
 
       - name: Run tests
         run: cargo test --release
+        working-directory: rust
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
           VCPKG_DEFAULT_TRIPLET: x64-windows-static
