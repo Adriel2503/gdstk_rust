@@ -52,9 +52,11 @@ Paridad verificada contra Python gdstk:
 
 El plan completo vive en `../research/arquitectura/gdstk_rust_bindings_migracion.md`.
 
-## Prerequisitos (Windows)
+## Prerequisitos
 
-1. **vcpkg** con zlib y qhull:
+### Windows
+
+1. **vcpkg** con `zlib` y `qhull`:
    ```powershell
    git clone https://github.com/microsoft/vcpkg
    cd vcpkg
@@ -62,51 +64,151 @@ El plan completo vive en `../research/arquitectura/gdstk_rust_bindings_migracion
    .\vcpkg install qhull zlib --triplet x64-windows
    ```
 
-2. Setear variable de entorno `VCPKG_ROOT` apuntando al clone de vcpkg:
+2. Setear `VCPKG_ROOT` apuntando al clone de vcpkg:
    ```powershell
    setx VCPKG_ROOT "C:\path\to\vcpkg"
    ```
 
-3. **Rust toolchain MSVC** (no MinGW):
+3. **Rust toolchain MSVC**:
    ```powershell
    rustup default stable-x86_64-pc-windows-msvc
    ```
 
-## Build
+4. Opcional: usar `x64-windows-static` para evitar copiar DLLs junto a los binarios.
+   - `x64-windows`: enlace dinámico. Necesita `zlib1.dll` y `qhull_r.dll` junto
+     al `.exe` al ejecutar.
+   - `x64-windows-static`: enlace estático. Integra esas dependencias dentro del
+     binario y evita copiar DLLs para los ejemplos/tests.
+
+5. Si quieres probar el flujo completo de esta carpeta desde PowerShell, ejecuta:
+   ```powershell
+   .\run_tests.ps1
+   ```
+   Ese script asume que `VCPKG_ROOT` apunta a tu instalación de vcpkg y que
+   `zlib` / `qhull` ya están instalados para el triplet elegido.
+
+### Linux
+
+Instalar el toolchain C++ y los paquetes de desarrollo:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y build-essential pkg-config zlib1g-dev libqhull-dev
+```
+
+Si tu distribución usa otros nombres de paquetes, instala los equivalentes que
+expongan `zlib.pc` y `qhull_r.pc` para `pkg-config` (por ejemplo,
+`qhull-devel` en algunas distros RPM).
+
+Si quieres probar el flujo completo de esta carpeta, ejecuta:
+```sh
+./run_tests.sh
+```
+El script valida que `pkg-config` esté disponible y luego usa los paquetes del
+sistema para `zlib` y `qhull`.
+
+### macOS
+
+```sh
+brew install pkg-config qhull zlib
+export PKG_CONFIG_PATH="$(brew --prefix qhull)/lib/pkgconfig:$(brew --prefix zlib)/lib/pkgconfig:$PKG_CONFIG_PATH"
+```
+
+Luego puedes correr:
+```sh
+./run_tests.sh
+```
+En macOS, `pkg-config` debe poder ver los `.pc` de Homebrew para `qhull` y
+`zlib`.
+
+## Instalar dependencias extra
+
+Si te falta alguna pieza del entorno, estas son las más comunes:
+
+### Windows
 
 ```powershell
+git clone https://github.com/microsoft/vcpkg C:\vcpkg
+cd C:\vcpkg
+.\bootstrap-vcpkg.bat
+.\vcpkg install zlib qhull --triplet x64-windows
+```
+
+Si prefieres evitar DLLs en tiempo de ejecución:
+```powershell
+.\vcpkg install zlib qhull --triplet x64-windows-static
+```
+
+### Linux
+
+```sh
+sudo apt-get update
+sudo apt-get install -y build-essential pkg-config zlib1g-dev libqhull-dev
+```
+
+En distros RPM, los nombres equivalentes suelen ser parecidos a:
+```sh
+sudo dnf install -y gcc-c++ make pkgconf-pkg-config zlib-devel qhull-devel
+```
+
+### macOS
+
+```sh
+brew install pkg-config zlib qhull
+```
+
+Si Homebrew no expone los `.pc` automáticamente, exporta `PKG_CONFIG_PATH` con
+las rutas de `zlib` y `qhull` como se mostró arriba.
+
+## Build
+
+```sh
 cd rust
 cargo build
 ```
 
-El `build.rs` compila los 18 archivos de `../src/`, vendored Clipper, los shims C++, y linkea zlib/qhull desde vcpkg.
+`build.rs` compila los 18 archivos de `../src/`, vendored Clipper y los shims
+C++; luego resuelve `zlib` y `qhull` con `vcpkg` en Windows o `pkg-config` en
+Unix.
 
 ## Uso
+
+### Windows
 
 ```powershell
 $env:VCPKG_ROOT = "C:\vcpkg"
 cargo build
-# Copiar DLLs junto al exe (una vez):
+cargo run --example count_cells -- path\to\file.gds
+```
+
+Si usas el triplet dinámico (`x64-windows`), copia las DLLs junto al binario de
+ejemplo una vez:
+
+```powershell
 Copy-Item C:\vcpkg\installed\x64-windows\bin\zlib1.dll target\debug\examples\
 Copy-Item C:\vcpkg\installed\x64-windows\bin\qhull_r.dll target\debug\examples\
+```
+
+### Linux / macOS
+
+```sh
+cargo build
 cargo run --example count_cells -- path/to/file.gds
 ```
 
 Debe imprimir el mismo número que:
+
 ```python
 import gdstk
 print(len(gdstk.read_gds("file.gds").cells))
 ```
 
-Nota: en una versión futura, `build.rs` copiará las DLLs automáticamente o
-evaluaremos el triplet `x64-windows-static` para eliminar la dependencia runtime.
-
 ## Testing
 
-```powershell
-$env:VCPKG_ROOT = "C:\vcpkg"
+### Unix
 
-# Tests de integración (16 tests, ~0.5 s)
+```sh
+# Tests de integración
 cargo test --release
 
 # Benchmarks estadísticos con criterion
@@ -120,6 +222,29 @@ RUN_BENCH=1 ./run_tests.sh
 
 # Regenerar snapshots cuando el output cambia intencionalmente
 REGENERATE_SNAPSHOTS=1 cargo test --release
+```
+
+### Windows
+
+```powershell
+$env:VCPKG_ROOT = "C:\vcpkg"
+
+# Tests de integración
+cargo test --release
+
+# Benchmarks estadísticos con criterion
+cargo bench
+
+# Flujo completo (build + test + snapshots)
+.\run_tests.ps1
+
+# Flujo completo + benchmarks
+$env:RUN_BENCH = "1"
+.\run_tests.ps1
+
+# Regenerar snapshots cuando el output cambia intencionalmente
+$env:REGENERATE_SNAPSHOTS = "1"
+cargo test --release
 ```
 
 Los tests usan `proof_lib.gds` (incluido en gdstk/tests/). Algunos tests
@@ -137,7 +262,7 @@ opcionales requieren `tinytapeout.gds` del repo `tinytapeout_gds_viewer/`
 ```
 rust/
 ├── Cargo.toml
-├── build.rs          # compila C++ + linkea vcpkg
+├── build.rs          # compila C++ + resuelve vcpkg/pkg-config
 ├── src/
 │   ├── lib.rs        # bridge cxx
 │   ├── shims.h       # API no-templated para cxx

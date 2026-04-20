@@ -1,7 +1,7 @@
 [package]
 name = "gdstk-rs"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Rust bindings for gdstk (GDSII/OASIS layout library) via cxx"
 license = "BSL-1.0"
 
@@ -14,9 +14,10 @@ cxx = "1.0.194"
 
 [build-dependencies]
 cxx-build = "1.0.194"
+pkg-config = "0.3"
 
 [dev-dependencies]
-criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 [[bench]]
 name = "gds_bench"
