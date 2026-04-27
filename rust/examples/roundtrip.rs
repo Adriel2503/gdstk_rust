@@ -6,8 +6,12 @@ use std::env;
 use gdstk_rs::Library;
 
 fn main() {
-    let src = env::args().nth(1).expect("usage: roundtrip <src.gds> <dst.gds>");
-    let dst = env::args().nth(2).expect("usage: roundtrip <src.gds> <dst.gds>");
+    let src = env::args()
+        .nth(1)
+        .expect("usage: roundtrip <src.gds> <dst.gds>");
+    let dst = env::args()
+        .nth(2)
+        .expect("usage: roundtrip <src.gds> <dst.gds>");
 
     let lib_a = Library::open(&src);
     lib_a.write_gds(&dst).expect("write_gds failed");
@@ -48,7 +52,10 @@ fn main() {
     if diffs == 0 {
         println!("ROUNDTRIP ✓ — 0 cambios detectados");
     } else {
-        println!("ROUNDTRIP ✗ — {diffs} regiones, {:.4} µm² total", total_area);
+        println!(
+            "ROUNDTRIP ✗ — {diffs} regiones, {:.4} µm² total",
+            total_area
+        );
         std::process::exit(1);
     }
 }

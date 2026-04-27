@@ -2,7 +2,9 @@
 
 #include <cstring>
 #include <limits>
+#include <set>
 #include <string>
+#include <vector>
 
 #include "gdstk/gdstk.hpp"
 
@@ -15,6 +17,12 @@ namespace gdstk_shim {
 // PIMPL: the actual gdstk::Library lives here, isolated from shims.h.
 struct LibraryHandle::Impl {
     gdstk::Library lib;
+    // Lazy cache for Library::layers(). Computed on first call to
+    // library_tag_count/at; never invalidated (Library is read-only after
+    // open()). `mutable` because the public shim functions take a
+    // const LibraryHandle& reference.
+    mutable std::vector<gdstk::Tag> cached_tags;
+    mutable bool tags_cached = false;
 
     Impl() {
         lib.name = nullptr;
@@ -100,6 +108,24 @@ struct FlattenedPolygonsHandle::Impl {
 FlattenedPolygonsHandle::FlattenedPolygonsHandle()
     : impl(std::make_unique<Impl>()) {}
 FlattenedPolygonsHandle::~FlattenedPolygonsHandle() = default;
+
+// ---- XorSplitHandle PIMPL ----
+// Stores added/removed polygons as flat (layer, datatype, points) records.
+// We don't keep gdstk::Polygon* alive: the boolean() result polygons are
+// freed inside cell_xor_polygons_split, with their geometry copied into
+// these vectors first. Avoids leaking gdstk allocations across the cxx
+// boundary and keeps the Rust side allocation-free of C++ types.
+struct XorSplitHandle::Impl {
+    struct OwnedPoly {
+        uint32_t layer;
+        uint32_t datatype;
+        std::vector<Point2D> points;
+    };
+    std::vector<OwnedPoly> added;
+    std::vector<OwnedPoly> removed;
+};
+XorSplitHandle::XorSplitHandle() : impl(std::make_unique<Impl>()) {}
+XorSplitHandle::~XorSplitHandle() = default;
 
 // All handle types are empty marker structs. We never construct them
 // directly; we reinterpret_cast gdstk::* into them. The cxx bridge sees
@@ -1072,6 +1098,146 @@ XorMetrics cell_xor_with(const CellHandle& a, const CellHandle& b, uint32_t laye
 XorMetrics cell_xor_with_polygons_only(const CellHandle& a, const CellHandle& b,
                                        uint32_t layer) {
     return cell_xor_impl(a, b, layer, /*include_paths=*/false);
+}
+
+// ---- Directional XOR (added / removed) ----
+
+// Copies geometry from boolean() result polygons into `dest`, leaving
+// the original allocations to be freed by the caller.
+static void copy_into_owned(const gdstk::Array<gdstk::Polygon*>& result,
+                            std::vector<XorSplitHandle::Impl::OwnedPoly>& dest) {
+    dest.reserve(dest.size() + result.count);
+    for (uint64_t i = 0; i < result.count; i++) {
+        const gdstk::Polygon* p = result[i];
+        XorSplitHandle::Impl::OwnedPoly op;
+        op.layer = gdstk::get_layer(p->tag);
+        op.datatype = gdstk::get_type(p->tag);
+        op.points.reserve(p->point_array.count);
+        for (uint64_t j = 0; j < p->point_array.count; j++) {
+            op.points.push_back(Point2D{p->point_array[j].x, p->point_array[j].y});
+        }
+        dest.push_back(std::move(op));
+    }
+}
+
+static void run_boolean_not(const gdstk::Array<gdstk::Polygon*>& lhs,
+                            const gdstk::Array<gdstk::Polygon*>& rhs,
+                            std::vector<XorSplitHandle::Impl::OwnedPoly>& dest) {
+    if (lhs.count == 0) return;  // empty minus anything is empty
+    gdstk::Array<gdstk::Polygon*> result = {};
+    gdstk::ErrorCode err = gdstk::boolean(lhs, rhs, gdstk::Operation::Not,
+                                          /*scaling=*/1000.0, result);
+    (void)err;
+    copy_into_owned(result, dest);
+    for (uint64_t i = 0; i < result.count; i++) {
+        result[i]->clear();
+        gdstk::free_allocation(result[i]);
+    }
+    result.clear();
+}
+
+std::unique_ptr<XorSplitHandle> cell_xor_polygons_split(
+    const CellHandle& a, const CellHandle& b, uint32_t layer) {
+    const gdstk::Cell* cell_a = as_cell(a);
+    const gdstk::Cell* cell_b = as_cell(b);
+
+    gdstk::Array<gdstk::Polygon*> filtered_a = {};
+    gdstk::Array<gdstk::Polygon*> filtered_b = {};
+    gdstk::Array<gdstk::Polygon*> owned_temp = {};
+
+    // Always include path-derived polygons — same correctness rationale
+    // as cell_xor_with: GDS files with FlexPath/RobustPath would otherwise
+    // miss diff geometry on wires.
+    collect_polygons_for_layer(cell_a, layer, filtered_a, owned_temp);
+    collect_polygons_for_layer(cell_b, layer, filtered_b, owned_temp);
+
+    auto handle = std::make_unique<XorSplitHandle>();
+
+    // added = polygons in B that are not in A.
+    run_boolean_not(filtered_b, filtered_a, handle->impl->added);
+    // removed = polygons in A that are not in B.
+    run_boolean_not(filtered_a, filtered_b, handle->impl->removed);
+
+    // Free path-derived polygons we collected.
+    for (uint64_t i = 0; i < owned_temp.count; i++) {
+        owned_temp[i]->clear();
+        gdstk::free_allocation(owned_temp[i]);
+    }
+    owned_temp.clear();
+    filtered_a.clear();
+    filtered_b.clear();
+
+    return handle;
+}
+
+uint64_t xor_split_added_count(const XorSplitHandle& h) {
+    return h.impl->added.size();
+}
+uint64_t xor_split_removed_count(const XorSplitHandle& h) {
+    return h.impl->removed.size();
+}
+
+uint32_t xor_split_added_layer(const XorSplitHandle& h, uint64_t poly_idx) {
+    return poly_idx < h.impl->added.size() ? h.impl->added[poly_idx].layer : 0;
+}
+uint32_t xor_split_added_datatype(const XorSplitHandle& h, uint64_t poly_idx) {
+    return poly_idx < h.impl->added.size() ? h.impl->added[poly_idx].datatype : 0;
+}
+uint64_t xor_split_added_point_count(const XorSplitHandle& h, uint64_t poly_idx) {
+    return poly_idx < h.impl->added.size()
+        ? h.impl->added[poly_idx].points.size() : 0;
+}
+Point2D xor_split_added_point(const XorSplitHandle& h, uint64_t poly_idx,
+                              uint64_t point_idx) {
+    if (poly_idx >= h.impl->added.size()) return Point2D{0.0, 0.0};
+    const auto& pts = h.impl->added[poly_idx].points;
+    if (point_idx >= pts.size()) return Point2D{0.0, 0.0};
+    return pts[point_idx];
+}
+
+uint32_t xor_split_removed_layer(const XorSplitHandle& h, uint64_t poly_idx) {
+    return poly_idx < h.impl->removed.size() ? h.impl->removed[poly_idx].layer : 0;
+}
+uint32_t xor_split_removed_datatype(const XorSplitHandle& h, uint64_t poly_idx) {
+    return poly_idx < h.impl->removed.size() ? h.impl->removed[poly_idx].datatype : 0;
+}
+uint64_t xor_split_removed_point_count(const XorSplitHandle& h, uint64_t poly_idx) {
+    return poly_idx < h.impl->removed.size()
+        ? h.impl->removed[poly_idx].points.size() : 0;
+}
+Point2D xor_split_removed_point(const XorSplitHandle& h, uint64_t poly_idx,
+                                uint64_t point_idx) {
+    if (poly_idx >= h.impl->removed.size()) return Point2D{0.0, 0.0};
+    const auto& pts = h.impl->removed[poly_idx].points;
+    if (point_idx >= pts.size()) return Point2D{0.0, 0.0};
+    return pts[point_idx];
+}
+
+// ---- Library tag discovery ----
+
+static void ensure_tags_cached(const LibraryHandle& handle) {
+    if (handle.impl->tags_cached) return;
+    std::set<gdstk::Tag> seen;
+    for (uint64_t i = 0; i < handle.impl->lib.cell_array.count; i++) {
+        const gdstk::Cell* cell = handle.impl->lib.cell_array[i];
+        for (uint64_t j = 0; j < cell->polygon_array.count; j++) {
+            seen.insert(cell->polygon_array[j]->tag);
+        }
+    }
+    handle.impl->cached_tags.assign(seen.begin(), seen.end());
+    handle.impl->tags_cached = true;
+}
+
+uint64_t library_tag_count(const LibraryHandle& handle) {
+    ensure_tags_cached(handle);
+    return handle.impl->cached_tags.size();
+}
+
+GdsTag library_tag_at(const LibraryHandle& handle, uint64_t idx) {
+    ensure_tags_cached(handle);
+    if (idx >= handle.impl->cached_tags.size()) return GdsTag{0, 0};
+    gdstk::Tag t = handle.impl->cached_tags[idx];
+    return GdsTag{gdstk::get_layer(t), gdstk::get_type(t)};
 }
 
 }  // namespace gdstk_shim

@@ -1,7 +1,7 @@
 //! Criterion benchmarks para las operaciones principales de gdstk-rs.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use gdstk_rs::{gds_info, Library};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use gdstk_rs::{Library, gds_info};
 
 fn proof_lib_path() -> String {
     format!("{}/../tests/proof_lib.gds", env!("CARGO_MANIFEST_DIR"))

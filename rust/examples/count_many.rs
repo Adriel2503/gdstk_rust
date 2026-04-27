@@ -29,10 +29,7 @@ fn main() {
 
     // --- Secuencial ---
     let t0 = Instant::now();
-    let seq_totals: Vec<(String, u64)> = files
-        .iter()
-        .map(|p| (p.clone(), count_one(p)))
-        .collect();
+    let seq_totals: Vec<(String, u64)> = files.iter().map(|p| (p.clone(), count_one(p))).collect();
     let seq_elapsed = t0.elapsed();
 
     for (path, count) in &seq_totals {

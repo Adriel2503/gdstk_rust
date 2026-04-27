@@ -73,6 +73,20 @@ struct GdsInfoHandle {
     GdsInfoHandle& operator=(const GdsInfoHandle&) = delete;
 };
 
+// PIMPL handle owning the polygons of a directional XOR diff
+// (added = in B \ A, removed = in A \ B). Polygons are stored as flat
+// arrays of points (in layout units) so the Rust side can copy them
+// into OwnedPolygon without crossing the cxx boundary one polygon at a
+// time per gdstk::Polygon allocation.
+struct XorSplitHandle {
+    struct Impl;
+    std::unique_ptr<Impl> impl;
+    XorSplitHandle();
+    ~XorSplitHandle();
+    XorSplitHandle(const XorSplitHandle&) = delete;
+    XorSplitHandle& operator=(const XorSplitHandle&) = delete;
+};
+
 // ---- Library ----
 std::unique_ptr<LibraryHandle> read_gds_shim(rust::Str filename);
 uint64_t library_cell_count(const LibraryHandle& handle);
@@ -285,6 +299,33 @@ XorMetrics cell_xor_with(const CellHandle& a, const CellHandle& b, uint32_t laye
 // you only care about polygon-level diffs.
 XorMetrics cell_xor_with_polygons_only(const CellHandle& a, const CellHandle& b,
                                        uint32_t layer);
+
+// Directional XOR: returns polygons of (added = B\A) and (removed = A\B)
+// separately, including path-derived polygons. Lets callers paint added
+// vs removed differently in a diff visualization.
+std::unique_ptr<XorSplitHandle> cell_xor_polygons_split(
+    const CellHandle& a, const CellHandle& b, uint32_t layer);
+
+uint64_t xor_split_added_count(const XorSplitHandle& h);
+uint64_t xor_split_removed_count(const XorSplitHandle& h);
+
+uint32_t xor_split_added_layer(const XorSplitHandle& h, uint64_t poly_idx);
+uint32_t xor_split_added_datatype(const XorSplitHandle& h, uint64_t poly_idx);
+uint64_t xor_split_added_point_count(const XorSplitHandle& h, uint64_t poly_idx);
+Point2D xor_split_added_point(const XorSplitHandle& h, uint64_t poly_idx,
+                              uint64_t point_idx);
+
+uint32_t xor_split_removed_layer(const XorSplitHandle& h, uint64_t poly_idx);
+uint32_t xor_split_removed_datatype(const XorSplitHandle& h, uint64_t poly_idx);
+uint64_t xor_split_removed_point_count(const XorSplitHandle& h, uint64_t poly_idx);
+Point2D xor_split_removed_point(const XorSplitHandle& h, uint64_t poly_idx,
+                                uint64_t point_idx);
+
+// Distinct (layer, datatype) tags present in the library's polygon arrays.
+// Sorted ascending; cached on first call. Iterates only direct polygons
+// (paths are not polygonized — fast path discovery).
+uint64_t library_tag_count(const LibraryHandle& handle);
+GdsTag library_tag_at(const LibraryHandle& handle, uint64_t idx);
 
 }  // namespace gdstk_shim
 

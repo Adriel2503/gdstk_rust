@@ -6,7 +6,7 @@
 mod common;
 
 use common::{normalize_lf, proof_lib_path, run_example};
-use gdstk_rs::{gds_info, ErrorCode, Library};
+use gdstk_rs::{ErrorCode, GdsTag, Library, gds_info};
 
 // ---- Reading and metadata ----
 
@@ -46,8 +46,11 @@ fn cells_have_distinct_non_empty_names() {
     let mut names: Vec<String> = lib.cells().map(|c| c.name().to_owned()).collect();
     names.sort();
     names.dedup();
-    assert_eq!(names.len() as u64, lib.cell_count(),
-               "cell names should be unique");
+    assert_eq!(
+        names.len() as u64,
+        lib.cell_count(),
+        "cell names should be unique"
+    );
 }
 
 #[test]
@@ -64,7 +67,10 @@ fn polygon_areas_are_positive() {
             }
         }
     }
-    assert!(seen_positive, "expected at least one polygon with positive area");
+    assert!(
+        seen_positive,
+        "expected at least one polygon with positive area"
+    );
 }
 
 #[test]
@@ -97,8 +103,11 @@ fn references_target_cells() {
     for cell in lib.cells() {
         for r in cell.references() {
             // Referenced cell name should be non-empty.
-            assert!(!r.cell_name().is_empty(),
-                    "reference in cell '{}' has empty target", cell.name());
+            assert!(
+                !r.cell_name().is_empty(),
+                "reference in cell '{}' has empty target",
+                cell.name()
+            );
             // Magnification is typically ~1.0 in proof_lib.
             assert!(r.magnification() > 0.0);
         }
@@ -114,9 +123,13 @@ fn xor_with_self_is_zero() {
         for layer in 0u32..8 {
             let m = cell.xor_with(&cell, layer);
             assert_eq!(
-                m.region_count, 0,
+                m.region_count,
+                0,
                 "cell '{}' layer {} XOR with self should yield 0 regions (got {} area={})",
-                cell.name(), layer, m.region_count, m.area
+                cell.name(),
+                layer,
+                m.region_count,
+                m.area
             );
             assert_eq!(m.area, 0.0);
         }
@@ -197,9 +210,13 @@ fn roundtrip_preserves_geometry() {
         for layer in 0u32..8 {
             let m = cell_a.xor_with(&cell_b, layer);
             assert_eq!(
-                m.region_count, 0,
+                m.region_count,
+                0,
                 "cell '{}' layer {} changed in roundtrip ({} regions, {} area)",
-                cell_a.name(), layer, m.region_count, m.area
+                cell_a.name(),
+                layer,
+                m.region_count,
+                m.area
             );
         }
     }
@@ -229,7 +246,10 @@ fn polygon_perimeter_is_positive() {
             }
         }
     }
-    assert!(any_positive, "expected at least one polygon with perimeter > 0");
+    assert!(
+        any_positive,
+        "expected at least one polygon with perimeter > 0"
+    );
 }
 
 #[test]
@@ -264,12 +284,16 @@ fn cell_bbox_contains_all_polygons() {
             assert!(
                 cbb.min_x <= pbb.min_x + 1e-6 && cbb.max_x + 1e-6 >= pbb.max_x,
                 "cell '{}' bbox {:?} doesn't contain poly bbox {:?}",
-                cell.name(), cbb, pbb
+                cell.name(),
+                cbb,
+                pbb
             );
             assert!(
                 cbb.min_y <= pbb.min_y + 1e-6 && cbb.max_y + 1e-6 >= pbb.max_y,
                 "cell '{}' bbox {:?} doesn't contain poly bbox {:?}",
-                cell.name(), cbb, pbb
+                cell.name(),
+                cbb,
+                pbb
             );
         }
     }
@@ -369,12 +393,16 @@ fn polygon_first_point_is_within_bbox() {
             assert!(
                 p0.x >= bb.min_x - 1e-9 && p0.x <= bb.max_x + 1e-9,
                 "point(0).x {} outside bbox [{}, {}]",
-                p0.x, bb.min_x, bb.max_x
+                p0.x,
+                bb.min_x,
+                bb.max_x
             );
             assert!(
                 p0.y >= bb.min_y - 1e-9 && p0.y <= bb.max_y + 1e-9,
                 "point(0).y {} outside bbox [{}, {}]",
-                p0.y, bb.min_y, bb.max_y
+                p0.y,
+                bb.min_y,
+                bb.max_y
             );
         }
     }
@@ -388,7 +416,8 @@ fn extrema_for_no_repetition_is_origin() {
             let r = poly.repetition();
             // All polygons in proof_lib have kind=None → 1 extremum at origin.
             assert_eq!(
-                r.extrema_count(), 1,
+                r.extrema_count(),
+                1,
                 "None repetition should have 1 extremum (origin)"
             );
             let e0 = r.extremum(0);
@@ -426,16 +455,14 @@ fn cell_get_polygons_flat_leaf_matches_direct() {
         }
         tested = true;
         let direct = cell.polygon_count();
-        let flat = cell
-            .get_polygons()
-            .with_paths(false)
-            .depth(0)
-            .build();
+        let flat = cell.get_polygons().with_paths(false).depth(0).build();
         assert_eq!(
             flat.count(),
             direct,
             "leaf cell '{}' direct {} vs flat {}",
-            cell.name(), direct, flat.count()
+            cell.name(),
+            direct,
+            flat.count()
         );
     }
     assert!(tested, "expected at least one leaf cell without paths");
@@ -448,13 +475,10 @@ fn cell_get_polygons_depth_zero_ignores_references() {
     let lib = Library::open(&proof_lib_path());
     for cell in lib.cells() {
         let direct = cell.polygon_count();
-        let flat = cell
-            .get_polygons()
-            .depth(0)
-            .with_paths(false)
-            .build();
+        let flat = cell.get_polygons().depth(0).with_paths(false).build();
         assert_eq!(
-            flat.count(), direct,
+            flat.count(),
+            direct,
             "cell '{}' depth=0 should match direct polygons",
             cell.name()
         );
@@ -545,4 +569,156 @@ fn snapshot_list_polygons_proof_lib() {
         output, expected,
         "snapshot mismatch — run `REGENERATE_SNAPSHOTS=1 cargo test` if intentional"
     );
+}
+
+// ---- Directional XOR (xor_polygons_split) + Library::layers() ----
+
+/// Shoelace area for an OwnedPolygon's points (absolute value).
+fn owned_polygon_area(p: &gdstk_rs::OwnedPolygon) -> f64 {
+    let pts = &p.points;
+    if pts.len() < 3 {
+        return 0.0;
+    }
+    let mut acc = 0.0;
+    for i in 0..pts.len() {
+        let j = (i + 1) % pts.len();
+        acc += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+    }
+    (acc * 0.5).abs()
+}
+
+#[test]
+fn xor_polygons_split_self_is_empty() {
+    let lib = Library::open(&proof_lib_path());
+    for cell in lib.cells() {
+        for layer in 0u32..8 {
+            let split = cell.xor_polygons_split(&cell, layer);
+            assert!(
+                split.added.is_empty() && split.removed.is_empty(),
+                "cell '{}' layer {} XOR with self should be empty (added={} removed={})",
+                cell.name(),
+                layer,
+                split.added.len(),
+                split.removed.len(),
+            );
+        }
+    }
+}
+
+#[test]
+fn xor_polygons_split_after_roundtrip_is_empty() {
+    // Library written and re-read should match itself geometrically.
+    let tmp = std::env::temp_dir().join("gdstk_rs_test_split_roundtrip.gds");
+    let tmp_str = tmp.to_str().unwrap();
+    let lib_a = Library::open(&proof_lib_path());
+    lib_a.write_gds(tmp_str).expect("write_gds failed");
+    let lib_b = Library::open(tmp_str);
+
+    for cell_a in lib_a.cells() {
+        let cell_b = lib_b
+            .find_cell(cell_a.name())
+            .unwrap_or_else(|| panic!("cell '{}' missing after roundtrip", cell_a.name()));
+        for layer in 0u32..8 {
+            let split = cell_a.xor_polygons_split(&cell_b, layer);
+            assert!(
+                split.added.is_empty() && split.removed.is_empty(),
+                "cell '{}' layer {} unexpected diff (added={} removed={})",
+                cell_a.name(),
+                layer,
+                split.added.len(),
+                split.removed.len(),
+            );
+        }
+    }
+}
+
+#[test]
+fn xor_polygons_split_areas_match_xor_with() {
+    // Invariant: |added| + |removed| == area(symmetric XOR).
+    // Validates the directional split is consistent with the existing
+    // XOR summary on real geometry. Uses two opens of the same fixture
+    // against itself in the trivial direction (zero), then sums layers
+    // against an empty cell to exercise the non-zero branch.
+    let lib = Library::open(&proof_lib_path());
+
+    // Find a cell that has at least one polygon to test the non-empty case
+    // (added side will contain everything in `cell`, removed side empty).
+    let lib_empty = Library::open(&proof_lib_path());
+    let empty_cell = lib_empty
+        .cells()
+        .find(|c| c.polygon_count() == 0 && c.flexpath_count() == 0 && c.robustpath_count() == 0);
+
+    let target_cell = lib
+        .cells()
+        .find(|c| c.polygon_count() > 0)
+        .expect("proof_lib should have a non-empty cell");
+
+    if let Some(empty) = empty_cell {
+        for layer in 0u32..8 {
+            let metrics = target_cell.xor_with(&empty, layer);
+            let split = target_cell.xor_polygons_split(&empty, layer);
+
+            let added_area: f64 = split.added.iter().map(owned_polygon_area).sum();
+            let removed_area: f64 = split.removed.iter().map(owned_polygon_area).sum();
+
+            // `target_cell - empty` ≡ everything in target on this layer:
+            // expected to land in `removed`, since lhs = self = A.
+            assert!(
+                split.added.is_empty(),
+                "added against empty other should be empty",
+            );
+
+            let total = added_area + removed_area;
+            // Tolerance is generous: gdstk::boolean uses scaling=1000 internally,
+            // so geometry round-trips through int64 coords. 1e-3 layout-units²
+            // covers the rounding without masking real disagreement.
+            assert!(
+                (total - metrics.area).abs() < 1e-3 + metrics.area * 1e-9,
+                "layer {}: split total {} disagrees with xor_with area {}",
+                layer,
+                total,
+                metrics.area,
+            );
+        }
+    }
+}
+
+#[test]
+fn library_layers_matches_polygons() {
+    use std::collections::HashSet;
+
+    let lib = Library::open(&proof_lib_path());
+
+    let mut expected: HashSet<GdsTag> = HashSet::new();
+    for cell in lib.cells() {
+        for poly in cell.polygons() {
+            expected.insert(GdsTag {
+                layer: poly.layer(),
+                datatype: poly.datatype(),
+            });
+        }
+    }
+
+    let actual: Vec<GdsTag> = lib.layers();
+    let actual_set: HashSet<GdsTag> = actual.iter().copied().collect();
+
+    assert_eq!(
+        actual.len(),
+        actual_set.len(),
+        "Library::layers() must be deduplicated",
+    );
+    assert_eq!(actual_set, expected);
+
+    // Sorted ascending: each tag must be strictly greater than its predecessor.
+    let pair = |t: GdsTag| ((t.layer as u64) << 32) | (t.datatype as u64);
+    for w in actual.windows(2) {
+        assert!(
+            pair(w[0]) < pair(w[1]),
+            "Library::layers() must be sorted ascending",
+        );
+    }
+
+    // Cached call — second invocation must yield identical result.
+    let actual2 = lib.layers();
+    assert_eq!(actual, actual2);
 }

@@ -4,7 +4,9 @@ use std::env;
 use std::time::Instant;
 
 fn main() {
-    let path = env::args().nth(1).expect("usage: gds_info_bench <file.gds>");
+    let path = env::args()
+        .nth(1)
+        .expect("usage: gds_info_bench <file.gds>");
 
     // gds_info (peek rápido)
     let t0 = Instant::now();

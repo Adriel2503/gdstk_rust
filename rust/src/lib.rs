@@ -57,6 +57,7 @@ mod ffi {
         type RawCellHandle;
         type RepetitionHandle;
         type FlattenedPolygonsHandle;
+        type XorSplitHandle;
 
         // Library
         fn read_gds_shim(filename: &str) -> UniquePtr<LibraryHandle>;
@@ -134,19 +135,12 @@ mod ffi {
             element_idx: u64,
             spine_idx: u64,
         ) -> f64;
-        fn flexpath_element_offset(
-            path: &FlexPathHandle,
-            element_idx: u64,
-            spine_idx: u64,
-        ) -> f64;
+        fn flexpath_element_offset(path: &FlexPathHandle, element_idx: u64, spine_idx: u64) -> f64;
         fn flexpath_element_end_type(path: &FlexPathHandle, element_idx: u64) -> u8;
         fn flexpath_element_join_type(path: &FlexPathHandle, element_idx: u64) -> u8;
         fn flexpath_element_bend_type(path: &FlexPathHandle, element_idx: u64) -> u8;
         fn flexpath_element_bend_radius(path: &FlexPathHandle, element_idx: u64) -> f64;
-        fn flexpath_element_end_extensions(
-            path: &FlexPathHandle,
-            element_idx: u64,
-        ) -> Point2D;
+        fn flexpath_element_end_extensions(path: &FlexPathHandle, element_idx: u64) -> Point2D;
         fn flexpath_simple_path(path: &FlexPathHandle) -> bool;
         fn flexpath_scale_width(path: &FlexPathHandle) -> bool;
 
@@ -159,10 +153,7 @@ mod ffi {
         fn robustpath_tolerance(path: &RobustPathHandle) -> f64;
         fn robustpath_max_evals(path: &RobustPathHandle) -> u64;
         fn robustpath_element_end_width(path: &RobustPathHandle, element_idx: u64) -> f64;
-        fn robustpath_element_end_offset(
-            path: &RobustPathHandle,
-            element_idx: u64,
-        ) -> f64;
+        fn robustpath_element_end_offset(path: &RobustPathHandle, element_idx: u64) -> f64;
         fn robustpath_element_end_type(path: &RobustPathHandle, element_idx: u64) -> u8;
         fn robustpath_simple_path(path: &RobustPathHandle) -> bool;
         fn robustpath_scale_width(path: &RobustPathHandle) -> bool;
@@ -225,23 +216,58 @@ mod ffi {
             datatype: u32,
         ) -> UniquePtr<FlattenedPolygonsHandle>;
         fn flattened_polygons_count(view: &FlattenedPolygonsHandle) -> u64;
-        fn flattened_polygons_at(
-            view: &FlattenedPolygonsHandle,
-            idx: u64,
-        ) -> &PolygonHandle;
+        fn flattened_polygons_at(view: &FlattenedPolygonsHandle, idx: u64) -> &PolygonHandle;
 
         // Boolean XOR (includes path-derived polygons).
         fn cell_xor_with(a: &CellHandle, b: &CellHandle, layer: u32) -> XorMetrics;
         // Legacy: polygons only, ignores paths.
-        fn cell_xor_with_polygons_only(
+        fn cell_xor_with_polygons_only(a: &CellHandle, b: &CellHandle, layer: u32) -> XorMetrics;
+
+        // Directional XOR (added/removed split).
+        fn cell_xor_polygons_split(
             a: &CellHandle,
             b: &CellHandle,
             layer: u32,
-        ) -> XorMetrics;
+        ) -> UniquePtr<XorSplitHandle>;
+        fn xor_split_added_count(h: &XorSplitHandle) -> u64;
+        fn xor_split_removed_count(h: &XorSplitHandle) -> u64;
+        fn xor_split_added_layer(h: &XorSplitHandle, poly_idx: u64) -> u32;
+        fn xor_split_added_datatype(h: &XorSplitHandle, poly_idx: u64) -> u32;
+        fn xor_split_added_point_count(h: &XorSplitHandle, poly_idx: u64) -> u64;
+        fn xor_split_added_point(h: &XorSplitHandle, poly_idx: u64, point_idx: u64) -> Point2D;
+        fn xor_split_removed_layer(h: &XorSplitHandle, poly_idx: u64) -> u32;
+        fn xor_split_removed_datatype(h: &XorSplitHandle, poly_idx: u64) -> u32;
+        fn xor_split_removed_point_count(h: &XorSplitHandle, poly_idx: u64) -> u64;
+        fn xor_split_removed_point(h: &XorSplitHandle, poly_idx: u64, point_idx: u64) -> Point2D;
+
+        // Library tag discovery (lazy-cached set of (layer, datatype)).
+        fn library_tag_count(handle: &LibraryHandle) -> u64;
+        fn library_tag_at(handle: &LibraryHandle, idx: u64) -> GdsTag;
     }
 }
 
 pub use ffi::{BoundingBox, GdsTag, Point2D, XorMetrics};
+
+/// Self-contained polygon with no lifetime to a Library. Used for diff
+/// results that must outlive the cells they came from (e.g. passing XOR
+/// geometry to a renderer or to another crate).
+#[derive(Clone, Debug, PartialEq)]
+pub struct OwnedPolygon {
+    pub layer: u32,
+    pub datatype: u32,
+    pub points: Vec<Point2D>,
+}
+
+/// Result of `Cell::xor_polygons_split`. Polygons are partitioned by
+/// direction so a UI can paint them differently (e.g. green = added,
+/// red = removed).
+#[derive(Clone, Debug, Default)]
+pub struct XorSplit {
+    /// Polygons present in `other` but not in `self` (B \ A).
+    pub added: Vec<OwnedPolygon>,
+    /// Polygons present in `self` but not in `other` (A \ B).
+    pub removed: Vec<OwnedPolygon>,
+}
 
 // ---- Ergonomic wrappers ----
 
@@ -445,6 +471,21 @@ impl<'a> Cell<'a> {
     /// care about shapes already saved as polygons.
     pub fn xor_with_polygons_only(&self, other: &Cell<'_>, layer: u32) -> XorMetrics {
         ffi::cell_xor_with_polygons_only(self.handle, other.handle, layer)
+    }
+
+    /// Directional XOR. Returns the polygons of the difference partitioned
+    /// into `added` (in `other` but not in `self`) and `removed` (in `self`
+    /// but not in `other`), filtered by `layer`. Includes path-derived
+    /// polygons (FlexPath / RobustPath polygonized internally).
+    ///
+    /// Costs roughly twice a single `xor_with` (two `boolean` calls) and
+    /// allocates owned geometry. Use `xor_with` for a fast scalar summary.
+    pub fn xor_polygons_split(&self, other: &Cell<'_>, layer: u32) -> XorSplit {
+        let h = ffi::cell_xor_polygons_split(self.handle, other.handle, layer);
+        XorSplit {
+            added: collect_split_polys(&h, SplitSide::Added),
+            removed: collect_split_polys(&h, SplitSide::Removed),
+        }
     }
 
     /// Axis-aligned bounding box covering all polygons, labels, paths, and
@@ -1409,6 +1450,67 @@ impl<'a> FlattenedPolygons<'a> {
 
     pub fn polygons(&self) -> impl Iterator<Item = Polygon<'_>> + '_ {
         (0..self.count()).map(move |i| self.polygon(i))
+    }
+}
+
+// ---- Directional XOR helpers ----
+
+#[derive(Clone, Copy)]
+enum SplitSide {
+    Added,
+    Removed,
+}
+
+fn collect_split_polys(
+    h: &cxx::UniquePtr<ffi::XorSplitHandle>,
+    side: SplitSide,
+) -> Vec<OwnedPolygon> {
+    let n = match side {
+        SplitSide::Added => ffi::xor_split_added_count(h),
+        SplitSide::Removed => ffi::xor_split_removed_count(h),
+    };
+    let mut out = Vec::with_capacity(n as usize);
+    for i in 0..n {
+        let (layer, datatype, point_count) = match side {
+            SplitSide::Added => (
+                ffi::xor_split_added_layer(h, i),
+                ffi::xor_split_added_datatype(h, i),
+                ffi::xor_split_added_point_count(h, i),
+            ),
+            SplitSide::Removed => (
+                ffi::xor_split_removed_layer(h, i),
+                ffi::xor_split_removed_datatype(h, i),
+                ffi::xor_split_removed_point_count(h, i),
+            ),
+        };
+        let mut points = Vec::with_capacity(point_count as usize);
+        for j in 0..point_count {
+            let p = match side {
+                SplitSide::Added => ffi::xor_split_added_point(h, i, j),
+                SplitSide::Removed => ffi::xor_split_removed_point(h, i, j),
+            };
+            points.push(p);
+        }
+        out.push(OwnedPolygon {
+            layer,
+            datatype,
+            points,
+        });
+    }
+    out
+}
+
+impl Library {
+    /// Distinct (layer, datatype) tags found in the library's direct
+    /// polygons. Sorted ascending by `(layer, datatype)`. Cached after
+    /// the first call.
+    ///
+    /// Path elements (FlexPath / RobustPath) are not polygonized — only
+    /// pre-existing polygons contribute. This is intentionally fast for
+    /// layer discovery before iterating with `xor_polygons_split`.
+    pub fn layers(&self) -> Vec<GdsTag> {
+        let n = ffi::library_tag_count(&self.inner);
+        (0..n).map(|i| ffi::library_tag_at(&self.inner, i)).collect()
     }
 }
 
