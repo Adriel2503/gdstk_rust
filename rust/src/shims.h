@@ -89,6 +89,12 @@ struct XorSplitHandle {
 
 // ---- Library ----
 std::unique_ptr<LibraryHandle> read_gds_shim(rust::Str filename);
+
+// Same as read_gds_shim but exposes the parser's error code via out_error.
+// Returns null on error; caller decides how to surface the failure.
+// Mirrors the pattern of gds_info_read.
+std::unique_ptr<LibraryHandle> read_gds_with_error(rust::Str filename, uint8_t& out_error);
+
 uint64_t library_cell_count(const LibraryHandle& handle);
 const CellHandle& library_cell_at(const LibraryHandle& handle, uint64_t idx);
 // Fase 6 — metadata + write + top_level

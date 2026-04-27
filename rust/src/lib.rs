@@ -61,6 +61,7 @@ mod ffi {
 
         // Library
         fn read_gds_shim(filename: &str) -> UniquePtr<LibraryHandle>;
+        fn read_gds_with_error(filename: &str, out_error: &mut u8) -> UniquePtr<LibraryHandle>;
         fn library_cell_count(handle: &LibraryHandle) -> u64;
         fn library_cell_at(handle: &LibraryHandle, idx: u64) -> &CellHandle;
         fn library_name(handle: &LibraryHandle) -> &str;
@@ -285,6 +286,32 @@ impl Library {
         Self {
             inner: ffi::read_gds_shim(path),
         }
+    }
+
+    /// Parse a GDSII library from in-memory bytes.
+    ///
+    /// gdstk only exposes a path-based reader, so this writes `data` to a
+    /// temporary file, parses it, and removes the tempfile before returning.
+    /// Cleanup runs on every exit path (including parse failures and panics)
+    /// via `TempPath`'s `Drop` guard.
+    ///
+    /// Errors:
+    /// - `ErrorCode::FileError` if the tempfile cannot be created or written.
+    /// - Any `ErrorCode` from `gdstk::read_gds` if the bytes are not valid
+    ///   GDSII (`InvalidFile`, `ChecksumError`, `UnsupportedRecord`, ...).
+    pub fn from_bytes(data: &[u8]) -> Result<Self, Error> {
+        let path = TempPath::new("gdstk_rs_from_bytes", "gds")
+            .map_err(|_| Error(ErrorCode::FileError))?;
+        std::fs::write(path.as_str(), data).map_err(|_| Error(ErrorCode::FileError))?;
+
+        let mut code: u8 = 0;
+        let handle = ffi::read_gds_with_error(path.as_str(), &mut code);
+        let ec = ErrorCode::from_u8(code);
+        if ec != ErrorCode::NoError || handle.is_null() {
+            return Err(Error(ec));
+        }
+        Ok(Self { inner: handle })
+        // `path` drops here → tempfile removed.
     }
 
     pub fn cell_count(&self) -> u64 {
@@ -1511,6 +1538,46 @@ impl Library {
     pub fn layers(&self) -> Vec<GdsTag> {
         let n = ffi::library_tag_count(&self.inner);
         (0..n).map(|i| ffi::library_tag_at(&self.inner, i)).collect()
+    }
+}
+
+// ---- Internal: temporary file helper ----
+
+/// Owned temporary file path with cleanup-on-drop. Used by
+/// `Library::from_bytes` to bridge the path-only gdstk reader.
+///
+/// Filename is `<prefix>_<pid>_<counter>_<nanos>.<ext>`, unique enough for
+/// parallel tests and concurrent calls within the same process.
+struct TempPath {
+    path: std::path::PathBuf,
+}
+
+impl TempPath {
+    fn new(prefix: &str, ext: &str) -> std::io::Result<Self> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let name = format!("{prefix}_{pid}_{n}_{nanos}.{ext}");
+        Ok(Self {
+            path: std::env::temp_dir().join(name),
+        })
+    }
+
+    fn as_str(&self) -> &str {
+        // Tempdir + ASCII filename → UTF-8 in practice. If the tempdir is
+        // non-UTF-8 we pass "" and gdstk reports InputFileOpenError.
+        self.path.to_str().unwrap_or("")
+    }
+}
+
+impl Drop for TempPath {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 

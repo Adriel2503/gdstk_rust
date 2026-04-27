@@ -722,3 +722,77 @@ fn library_layers_matches_polygons() {
     let actual2 = lib.layers();
     assert_eq!(actual, actual2);
 }
+
+// ---- Library::from_bytes ----
+
+#[test]
+fn from_bytes_matches_open() {
+    // Parsing the same GDS file from path and from bytes must produce
+    // libraries that are geometrically identical.
+    let path = proof_lib_path();
+    let lib_path = Library::open(&path);
+    let bytes = std::fs::read(&path).expect("could not read fixture");
+    let lib_bytes = Library::from_bytes(&bytes).expect("from_bytes failed on valid GDS");
+
+    assert_eq!(lib_path.cell_count(), lib_bytes.cell_count());
+    assert!((lib_path.unit() - lib_bytes.unit()).abs() < 1e-18);
+    assert!((lib_path.precision() - lib_bytes.precision()).abs() < 1e-24);
+
+    for cell_a in lib_path.cells() {
+        let cell_b = lib_bytes
+            .find_cell(cell_a.name())
+            .unwrap_or_else(|| panic!("cell '{}' missing in from_bytes lib", cell_a.name()));
+        for layer in 0u32..8 {
+            let m = cell_a.xor_with(&cell_b, layer);
+            assert_eq!(
+                m.region_count, 0,
+                "cell '{}' layer {} differs between open() and from_bytes() ({} regions)",
+                cell_a.name(),
+                layer,
+                m.region_count
+            );
+        }
+    }
+}
+
+#[test]
+fn from_bytes_invalid_returns_error() {
+    let result = Library::from_bytes(b"NOT_A_VALID_GDS_FILE_AT_ALL_JUST_ASCII_BYTES");
+    let err = match result {
+        Ok(_) => panic!("expected error for garbage bytes, got Ok"),
+        Err(e) => e,
+    };
+    assert!(
+        matches!(
+            err.0,
+            ErrorCode::InvalidFile
+                | ErrorCode::InputFileError
+                | ErrorCode::InputFileOpenError
+                | ErrorCode::FileError
+                | ErrorCode::ChecksumError
+                | ErrorCode::UnsupportedRecord
+        ),
+        "unexpected error code for garbage bytes: {:?}",
+        err.0
+    );
+}
+
+#[test]
+fn from_bytes_empty_returns_error() {
+    let result = Library::from_bytes(&[]);
+    let err = match result {
+        Ok(_) => panic!("expected error for empty bytes, got Ok"),
+        Err(e) => e,
+    };
+    assert!(
+        matches!(
+            err.0,
+            ErrorCode::InvalidFile
+                | ErrorCode::InputFileError
+                | ErrorCode::InputFileOpenError
+                | ErrorCode::FileError
+        ),
+        "unexpected error code for empty bytes: {:?}",
+        err.0
+    );
+}

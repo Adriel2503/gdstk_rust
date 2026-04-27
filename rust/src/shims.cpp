@@ -238,6 +238,25 @@ std::unique_ptr<LibraryHandle> read_gds_shim(rust::Str filename) {
     return handle;
 }
 
+std::unique_ptr<LibraryHandle> read_gds_with_error(rust::Str filename,
+                                                   uint8_t& out_error) {
+    auto handle = std::make_unique<LibraryHandle>();
+    std::string path(filename.data(), filename.size());
+
+    gdstk::ErrorCode err = gdstk::ErrorCode::NoError;
+    handle->impl->lib = gdstk::read_gds(path.c_str(),
+                                        /*unit=*/0.0,
+                                        /*tolerance=*/0.0,
+                                        /*shape_tags=*/nullptr,
+                                        &err);
+    out_error = static_cast<uint8_t>(err);
+    if (err != gdstk::ErrorCode::NoError) {
+        // Caller treats null as failure (mirrors gds_info_read).
+        return nullptr;
+    }
+    return handle;
+}
+
 uint64_t library_cell_count(const LibraryHandle& handle) {
     return handle.impl->lib.cell_array.count;
 }
