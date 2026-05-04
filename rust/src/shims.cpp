@@ -701,15 +701,26 @@ bool robustpath_scale_width(const RobustPathHandle& path) {
 // `cell` that are on the given layer. Polygons generated from paths are
 // owned (heap-allocated) and are appended to `owned_temp` for later cleanup.
 // Existing polygons from polygon_array are views (not owned).
+//
+// `match_datatype=true` filters by both layer AND datatype; `false` keeps the
+// legacy layer-only behavior used by `cell_xor_with` / `cell_xor_with_polygons_only`.
 static void collect_polygons_for_layer(
     const gdstk::Cell* cell,
     uint32_t layer,
+    uint32_t datatype,
+    bool match_datatype,
     gdstk::Array<gdstk::Polygon*>& filtered,
     gdstk::Array<gdstk::Polygon*>& owned_temp) {
+    auto tag_matches = [&](gdstk::Tag t) {
+        if (gdstk::get_layer(t) != layer) return false;
+        if (match_datatype && gdstk::get_type(t) != datatype) return false;
+        return true;
+    };
+
     // 1. Direct polygons from polygon_array (view, not owned).
     for (uint64_t i = 0; i < cell->polygon_array.count; i++) {
         gdstk::Polygon* p = cell->polygon_array[i];
-        if (gdstk::get_layer(p->tag) == layer) {
+        if (tag_matches(p->tag)) {
             filtered.append(p);
         }
     }
@@ -720,7 +731,7 @@ static void collect_polygons_for_layer(
         gdstk::FlexPath* fp = cell->flexpath_array[i];
         bool any_match = false;
         for (uint64_t e = 0; e < fp->num_elements; e++) {
-            if (gdstk::get_layer(fp->elements[e].tag) == layer) {
+            if (tag_matches(fp->elements[e].tag)) {
                 any_match = true;
                 break;
             }
@@ -731,7 +742,7 @@ static void collect_polygons_for_layer(
         fp->to_polygons(/*filter=*/false, /*tag=*/0, path_polys);
         for (uint64_t j = 0; j < path_polys.count; j++) {
             gdstk::Polygon* p = path_polys[j];
-            if (gdstk::get_layer(p->tag) == layer) {
+            if (tag_matches(p->tag)) {
                 filtered.append(p);
                 owned_temp.append(p);
             } else {
@@ -748,7 +759,7 @@ static void collect_polygons_for_layer(
         gdstk::RobustPath* rp = cell->robustpath_array[i];
         bool any_match = false;
         for (uint64_t e = 0; e < rp->num_elements; e++) {
-            if (gdstk::get_layer(rp->elements[e].tag) == layer) {
+            if (tag_matches(rp->elements[e].tag)) {
                 any_match = true;
                 break;
             }
@@ -759,7 +770,7 @@ static void collect_polygons_for_layer(
         rp->to_polygons(/*filter=*/false, /*tag=*/0, path_polys);
         for (uint64_t j = 0; j < path_polys.count; j++) {
             gdstk::Polygon* p = path_polys[j];
-            if (gdstk::get_layer(p->tag) == layer) {
+            if (tag_matches(p->tag)) {
                 filtered.append(p);
                 owned_temp.append(p);
             } else {
@@ -785,8 +796,10 @@ static XorMetrics cell_xor_impl(const CellHandle& a, const CellHandle& b,
     gdstk::Array<gdstk::Polygon*> owned_temp = {};
 
     if (include_paths) {
-        collect_polygons_for_layer(cell_a, layer, filtered_a, owned_temp);
-        collect_polygons_for_layer(cell_b, layer, filtered_b, owned_temp);
+        collect_polygons_for_layer(cell_a, layer, /*datatype=*/0, /*match_datatype=*/false,
+                                   filtered_a, owned_temp);
+        collect_polygons_for_layer(cell_b, layer, /*datatype=*/0, /*match_datatype=*/false,
+                                   filtered_b, owned_temp);
     } else {
         for (uint64_t i = 0; i < cell_a->polygon_array.count; i++) {
             gdstk::Polygon* p = cell_a->polygon_array[i];
@@ -1156,7 +1169,7 @@ static void run_boolean_not(const gdstk::Array<gdstk::Polygon*>& lhs,
 }
 
 std::unique_ptr<XorSplitHandle> cell_xor_polygons_split(
-    const CellHandle& a, const CellHandle& b, uint32_t layer) {
+    const CellHandle& a, const CellHandle& b, uint32_t layer, uint32_t datatype) {
     const gdstk::Cell* cell_a = as_cell(a);
     const gdstk::Cell* cell_b = as_cell(b);
 
@@ -1166,9 +1179,12 @@ std::unique_ptr<XorSplitHandle> cell_xor_polygons_split(
 
     // Always include path-derived polygons — same correctness rationale
     // as cell_xor_with: GDS files with FlexPath/RobustPath would otherwise
-    // miss diff geometry on wires.
-    collect_polygons_for_layer(cell_a, layer, filtered_a, owned_temp);
-    collect_polygons_for_layer(cell_b, layer, filtered_b, owned_temp);
+    // miss diff geometry on wires. Filters by (layer, datatype) so polygons
+    // sharing a layer but with distinct datatypes are not collapsed together.
+    collect_polygons_for_layer(cell_a, layer, datatype, /*match_datatype=*/true,
+                               filtered_a, owned_temp);
+    collect_polygons_for_layer(cell_b, layer, datatype, /*match_datatype=*/true,
+                               filtered_b, owned_temp);
 
     auto handle = std::make_unique<XorSplitHandle>();
 

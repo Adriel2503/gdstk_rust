@@ -310,7 +310,7 @@ XorMetrics cell_xor_with_polygons_only(const CellHandle& a, const CellHandle& b,
 // separately, including path-derived polygons. Lets callers paint added
 // vs removed differently in a diff visualization.
 std::unique_ptr<XorSplitHandle> cell_xor_polygons_split(
-    const CellHandle& a, const CellHandle& b, uint32_t layer);
+    const CellHandle& a, const CellHandle& b, uint32_t layer, uint32_t datatype);
 
 uint64_t xor_split_added_count(const XorSplitHandle& h);
 uint64_t xor_split_removed_count(const XorSplitHandle& h);

@@ -229,6 +229,7 @@ mod ffi {
             a: &CellHandle,
             b: &CellHandle,
             layer: u32,
+            datatype: u32,
         ) -> UniquePtr<XorSplitHandle>;
         fn xor_split_added_count(h: &XorSplitHandle) -> u64;
         fn xor_split_removed_count(h: &XorSplitHandle) -> u64;
@@ -502,13 +503,13 @@ impl<'a> Cell<'a> {
 
     /// Directional XOR. Returns the polygons of the difference partitioned
     /// into `added` (in `other` but not in `self`) and `removed` (in `self`
-    /// but not in `other`), filtered by `layer`. Includes path-derived
-    /// polygons (FlexPath / RobustPath polygonized internally).
+    /// but not in `other`), filtered by `tag` (layer + datatype). Includes
+    /// path-derived polygons (FlexPath / RobustPath polygonized internally).
     ///
     /// Costs roughly twice a single `xor_with` (two `boolean` calls) and
     /// allocates owned geometry. Use `xor_with` for a fast scalar summary.
-    pub fn xor_polygons_split(&self, other: &Cell<'_>, layer: u32) -> XorSplit {
-        let h = ffi::cell_xor_polygons_split(self.handle, other.handle, layer);
+    pub fn xor_polygons_split(&self, other: &Cell<'_>, tag: GdsTag) -> XorSplit {
+        let h = ffi::cell_xor_polygons_split(self.handle, other.handle, tag.layer, tag.datatype);
         XorSplit {
             added: collect_split_polys(&h, SplitSide::Added),
             removed: collect_split_polys(&h, SplitSide::Removed),

@@ -592,7 +592,7 @@ fn xor_polygons_split_self_is_empty() {
     let lib = Library::open(&proof_lib_path());
     for cell in lib.cells() {
         for layer in 0u32..8 {
-            let split = cell.xor_polygons_split(&cell, layer);
+            let split = cell.xor_polygons_split(&cell, GdsTag { layer, datatype: 0 });
             assert!(
                 split.added.is_empty() && split.removed.is_empty(),
                 "cell '{}' layer {} XOR with self should be empty (added={} removed={})",
@@ -619,7 +619,7 @@ fn xor_polygons_split_after_roundtrip_is_empty() {
             .find_cell(cell_a.name())
             .unwrap_or_else(|| panic!("cell '{}' missing after roundtrip", cell_a.name()));
         for layer in 0u32..8 {
-            let split = cell_a.xor_polygons_split(&cell_b, layer);
+            let split = cell_a.xor_polygons_split(&cell_b, GdsTag { layer, datatype: 0 });
             assert!(
                 split.added.is_empty() && split.removed.is_empty(),
                 "cell '{}' layer {} unexpected diff (added={} removed={})",
@@ -656,7 +656,7 @@ fn xor_polygons_split_areas_match_xor_with() {
     if let Some(empty) = empty_cell {
         for layer in 0u32..8 {
             let metrics = target_cell.xor_with(&empty, layer);
-            let split = target_cell.xor_polygons_split(&empty, layer);
+            let split = target_cell.xor_polygons_split(&empty, GdsTag { layer, datatype: 0 });
 
             let added_area: f64 = split.added.iter().map(owned_polygon_area).sum();
             let removed_area: f64 = split.removed.iter().map(owned_polygon_area).sum();
