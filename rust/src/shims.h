@@ -312,6 +312,15 @@ XorMetrics cell_xor_with_polygons_only(const CellHandle& a, const CellHandle& b,
 std::unique_ptr<XorSplitHandle> cell_xor_polygons_split(
     const CellHandle& a, const CellHandle& b, uint32_t layer, uint32_t datatype);
 
+// Directional XOR over already-flattened polygon arrays. The caller is
+// expected to have built each FlattenedPolygons with a (layer, datatype)
+// filter via Cell::get_polygons().with_filter(...) or Reference::...; this
+// shim runs gdstk::boolean directly over the underlying arrays without
+// reconstructing temporary cells. Used by Miku's hierarchical diff to XOR
+// per-(origin, layer) buckets after walking SREF/AREF.
+std::unique_ptr<XorSplitHandle> polygons_xor_split(
+    const FlattenedPolygonsHandle& a, const FlattenedPolygonsHandle& b);
+
 uint64_t xor_split_added_count(const XorSplitHandle& h);
 uint64_t xor_split_removed_count(const XorSplitHandle& h);
 

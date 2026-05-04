@@ -777,6 +777,74 @@ fn from_bytes_invalid_returns_error() {
     );
 }
 
+// ---- xor_split_flat (FlattenedPolygons-based directional XOR) ----
+
+#[test]
+fn xor_split_flat_self_is_empty() {
+    // Una FP contra si misma debe devolver added/removed vacios.
+    let lib = Library::open(&proof_lib_path());
+    let cell = lib
+        .cells()
+        .find(|c| c.polygon_count() > 0)
+        .expect("proof_lib should have a non-empty cell");
+    for layer in 0u32..8 {
+        let fp = cell
+            .get_polygons()
+            .with_filter(layer, 0)
+            .build();
+        let split = gdstk_rs::xor_split_flat(&fp, &fp);
+        assert!(
+            split.added.is_empty() && split.removed.is_empty(),
+            "layer {}: self XOR debe ser vacio (added={} removed={})",
+            layer,
+            split.added.len(),
+            split.removed.len(),
+        );
+    }
+}
+
+#[test]
+fn xor_split_flat_against_empty_matches_xor_with() {
+    // Mismo invariante que xor_polygons_split_areas_match_xor_with pero
+    // sobre la API de FlattenedPolygons. target vs empty: todo el
+    // contenido de target en una capa deberia caer como removed.
+    let lib = Library::open(&proof_lib_path());
+    let lib_empty = Library::open(&proof_lib_path());
+    let target = lib
+        .cells()
+        .find(|c| c.polygon_count() > 0)
+        .expect("non-empty cell");
+    let empty = match lib_empty
+        .cells()
+        .find(|c| c.polygon_count() == 0 && c.flexpath_count() == 0 && c.robustpath_count() == 0)
+    {
+        Some(c) => c,
+        None => return,
+    };
+
+    for layer in 0u32..8 {
+        let fp_t = target.get_polygons().with_filter(layer, 0).build();
+        let fp_e = empty.get_polygons().with_filter(layer, 0).build();
+        let split = gdstk_rs::xor_split_flat(&fp_t, &fp_e);
+        // target - empty -> todo en `removed` (lado A == target == self).
+        assert!(
+            split.added.is_empty(),
+            "layer {}: added contra empty deberia ser vacio",
+            layer,
+        );
+        // Si target tiene polys en esa capa, removed no puede estar vacio.
+        let metrics = target.xor_with(&empty, layer);
+        if metrics.region_count > 0 {
+            assert!(
+                !split.removed.is_empty(),
+                "layer {}: removed deberia tener polys (xor_with reporta {} regiones)",
+                layer,
+                metrics.region_count,
+            );
+        }
+    }
+}
+
 #[test]
 fn from_bytes_empty_returns_error() {
     let result = Library::from_bytes(&[]);

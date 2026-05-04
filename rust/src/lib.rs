@@ -231,6 +231,12 @@ mod ffi {
             layer: u32,
             datatype: u32,
         ) -> UniquePtr<XorSplitHandle>;
+        // Directional XOR sobre arrays ya flattenados (ya filtrados por
+        // (layer, datatype) por el caller via with_filter()).
+        fn polygons_xor_split(
+            a: &FlattenedPolygonsHandle,
+            b: &FlattenedPolygonsHandle,
+        ) -> UniquePtr<XorSplitHandle>;
         fn xor_split_added_count(h: &XorSplitHandle) -> u64;
         fn xor_split_removed_count(h: &XorSplitHandle) -> u64;
         fn xor_split_added_layer(h: &XorSplitHandle, poly_idx: u64) -> u32;
@@ -1478,6 +1484,22 @@ impl<'a> FlattenedPolygons<'a> {
 
     pub fn polygons(&self) -> impl Iterator<Item = Polygon<'_>> + '_ {
         (0..self.count()).map(move |i| self.polygon(i))
+    }
+}
+
+/// Directional XOR sobre dos `FlattenedPolygons` ya filtradas por (layer,
+/// datatype). El caller construye cada FP con `Cell::get_polygons()` o
+/// `Reference::get_polygons()` aplicando `with_filter(layer, datatype)`;
+/// esta funcion no re-filtra. Devuelve `XorSplit { added, removed }`
+/// con la misma semantica que `Cell::xor_polygons_split`.
+///
+/// Util para diff jerarquico: agrupa polygons por (origin, layer) en
+/// FPs separadas y XOR'ealas par a par.
+pub fn xor_split_flat(a: &FlattenedPolygons<'_>, b: &FlattenedPolygons<'_>) -> XorSplit {
+    let h = ffi::polygons_xor_split(&a.inner, &b.inner);
+    XorSplit {
+        added: collect_split_polys(&h, SplitSide::Added),
+        removed: collect_split_polys(&h, SplitSide::Removed),
     }
 }
 

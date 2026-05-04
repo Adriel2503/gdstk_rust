@@ -1205,6 +1205,19 @@ std::unique_ptr<XorSplitHandle> cell_xor_polygons_split(
     return handle;
 }
 
+std::unique_ptr<XorSplitHandle> polygons_xor_split(
+    const FlattenedPolygonsHandle& a, const FlattenedPolygonsHandle& b) {
+    auto handle = std::make_unique<XorSplitHandle>();
+
+    // The caller pre-filtered both FPs by (layer, datatype) when building.
+    // We therefore run gdstk::boolean directly over the underlying arrays.
+    // added = B \ A, removed = A \ B (matches cell_xor_polygons_split).
+    run_boolean_not(b.impl->polygons, a.impl->polygons, handle->impl->added);
+    run_boolean_not(a.impl->polygons, b.impl->polygons, handle->impl->removed);
+
+    return handle;
+}
+
 uint64_t xor_split_added_count(const XorSplitHandle& h) {
     return h.impl->added.size();
 }
