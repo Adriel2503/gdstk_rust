@@ -181,7 +181,9 @@ fn resolve_zlib() -> NativeDeps {
             "x64-windows",
             "zlib",
             "zlib",
-            &["zlib", "zlibstatic"],
+            // vcpkg nombró la librería `zlib.lib` hasta zlib 1.3.1 y `z.lib`
+            // desde 1.3.2 (build con el CMake nuevo de zlib).
+            &["zlib", "zlibstatic", "z", "zs"],
             "install `zlib` in vcpkg (for example: `vcpkg install zlib --triplet x64-windows`)",
         );
     }
@@ -379,9 +381,18 @@ impl NativeDeps {
             .map(|name| format!("`{name}`"))
             .collect::<Vec<_>>()
             .join(", ");
+        let found: Vec<String> = std::fs::read_dir(&lib_dir)
+            .map(|rd| {
+                rd.filter_map(Result::ok)
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| n.ends_with(".lib"))
+                    .collect()
+            })
+            .unwrap_or_default();
         panic!(
-            "Could not find any of {expected_list} in `{}` for {dep_name}. Install {install_hint}.",
+            "Could not find any of {expected_list} in `{}` for {dep_name} (found: {}). Install {install_hint}.",
             lib_dir.display(),
+            found.join(", "),
         );
     }
 }
