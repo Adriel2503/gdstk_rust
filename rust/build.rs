@@ -66,6 +66,41 @@ impl NativeDeps {
         self.link_libs.extend(lib.libs);
     }
 
+    /// Como `emit_link_directives`, pero exige la version estatica (`.a`)
+    /// de cada libreria. qhull compilado desde fuente instala
+    /// `libqhullstatic_r.a` en lugar de `libqhull_r.a`.
+    fn emit_static_link_directives(&self) {
+        const SYSTEM_DIRS: &[&str] =
+            &["/usr/local/lib", "/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu", "/usr/lib64", "/usr/lib"];
+        let dirs: Vec<PathBuf> = self
+            .link_search_paths
+            .iter()
+            .cloned()
+            .chain(SYSTEM_DIRS.iter().map(PathBuf::from))
+            .collect();
+        for path in &self.link_search_paths {
+            println!("cargo:rustc-link-search=native={}", path.display());
+        }
+        for lib in &self.link_libs {
+            let names: Vec<String> = match lib.as_str() {
+                "qhull_r" => vec!["qhull_r".into(), "qhullstatic_r".into()],
+                other => vec![other.to_string()],
+            };
+            let found = names.iter().find_map(|n| {
+                dirs.iter().find(|d| d.join(format!("lib{n}.a")).exists()).map(|d| (n, d))
+            });
+            let Some((name, dir)) = found else {
+                panic!(
+                    "GDSTK_STATIC: no se encontro la version estatica de `{lib}` (lib{lib}.a) en {:?}. \
+                     Para qhull, compilarlo con BUILD_SHARED_LIBS=OFF y pasar QHULL_DIR.",
+                    dirs
+                );
+            };
+            println!("cargo:rustc-link-search=native={}", dir.display());
+            println!("cargo:rustc-link-lib=static={name}");
+        }
+    }
+
     fn emit_link_directives(&self) {
         for path in &self.link_search_paths {
             println!("cargo:rustc-link-search=native={}", path.display());
@@ -125,10 +160,22 @@ fn main() {
             .flag_if_supported("-Wno-unused-parameter");
     }
 
+    // GDSTK_STATIC=1 (Unix): libstdc++ se enlaza estatica mas abajo, asi
+    // que cc no debe agregar su `-lstdc++` dinamico.
+    let static_link = static_link_requested();
+    if static_link {
+        build.cpp_link_stdlib(None);
+    }
+
     build.compile("gdstk_rs");
 
     // System library linking.
-    deps.emit_link_directives();
+    if static_link {
+        deps.emit_static_link_directives();
+        link_static_stdcxx();
+    } else {
+        deps.emit_link_directives();
+    }
 
     // Keep the Unix link to libm explicit; qhull often needs it and the extra
     // directive is harmless on platforms where it is unnecessary.
@@ -146,9 +193,32 @@ fn rerun_if_env_changed() {
         "PKG_CONFIG_PATH",
         "PKG_CONFIG_LIBDIR",
         "PKG_CONFIG_SYSROOT_DIR",
+        "GDSTK_STATIC",
     ] {
         println!("cargo:rerun-if-env-changed={}", var);
     }
+}
+
+/// `GDSTK_STATIC=1`: zlib, qhull y libstdc++ quedan dentro del binario
+/// (distribucion de un solo ejecutable). Solo Unix; en MSVC se ignora.
+fn static_link_requested() -> bool {
+    !cfg!(target_env = "msvc")
+        && env::var("GDSTK_STATIC").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
+/// Enlaza `libstdc++.a` del compilador en uso (`c++ -print-file-name`).
+fn link_static_stdcxx() {
+    let cxx = env::var("CXX").unwrap_or_else(|_| "c++".into());
+    let out = Command::new(&cxx)
+        .arg("-print-file-name=libstdc++.a")
+        .output()
+        .unwrap_or_else(|e| panic!("GDSTK_STATIC: no se pudo ejecutar `{cxx}`: {e}"));
+    let path = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+    let dir = path.parent().filter(|_| path.is_absolute() && path.exists()).unwrap_or_else(|| {
+        panic!("GDSTK_STATIC: `{cxx}` no encuentra libstdc++.a (instala libstdc++-dev)")
+    });
+    println!("cargo:rustc-link-search=native={}", dir.display());
+    println!("cargo:rustc-link-lib=static=stdc++");
 }
 
 fn resolve_native_deps() -> NativeDeps {
