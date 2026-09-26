@@ -94,6 +94,8 @@ std::unique_ptr<LibraryHandle> read_gds_shim(rust::Str filename);
 // Returns null on error; caller decides how to surface the failure.
 // Mirrors the pattern of gds_info_read.
 std::unique_ptr<LibraryHandle> read_gds_with_error(rust::Str filename, uint8_t& out_error);
+std::unique_ptr<LibraryHandle> read_oas_with_error(rust::Str filename, uint8_t& out_error);
+uint8_t library_write_oas(const LibraryHandle& handle, rust::Str path);
 
 uint64_t library_cell_count(const LibraryHandle& handle);
 const CellHandle& library_cell_at(const LibraryHandle& handle, uint64_t idx);

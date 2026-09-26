@@ -257,6 +257,32 @@ std::unique_ptr<LibraryHandle> read_gds_with_error(rust::Str filename,
     return handle;
 }
 
+std::unique_ptr<LibraryHandle> read_oas_with_error(rust::Str filename,
+                                                   uint8_t& out_error) {
+    auto handle = std::make_unique<LibraryHandle>();
+    std::string path(filename.data(), filename.size());
+
+    gdstk::ErrorCode err = gdstk::ErrorCode::NoError;
+    // unit=0: conserva la unidad del archivo (OASIS siempre usa 1 µm).
+    handle->impl->lib = gdstk::read_oas(path.c_str(),
+                                        /*unit=*/0.0,
+                                        /*tolerance=*/0.0,
+                                        &err);
+    out_error = static_cast<uint8_t>(err);
+    if (err != gdstk::ErrorCode::NoError) {
+        return nullptr;
+    }
+    return handle;
+}
+
+uint8_t library_write_oas(const LibraryHandle& handle, rust::Str path) {
+    std::string p(path.data(), path.size());
+    gdstk::ErrorCode err = handle.impl->lib.write_oas(p.c_str(), /*circle_tolerance=*/0.0,
+                                                      /*deflate_level=*/6,
+                                                      /*config_flags=*/0);
+    return static_cast<uint8_t>(err);
+}
+
 uint64_t library_cell_count(const LibraryHandle& handle) {
     return handle.impl->lib.cell_array.count;
 }

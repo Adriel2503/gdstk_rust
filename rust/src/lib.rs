@@ -62,6 +62,8 @@ mod ffi {
         // Library
         fn read_gds_shim(filename: &str) -> UniquePtr<LibraryHandle>;
         fn read_gds_with_error(filename: &str, out_error: &mut u8) -> UniquePtr<LibraryHandle>;
+        fn read_oas_with_error(filename: &str, out_error: &mut u8) -> UniquePtr<LibraryHandle>;
+        fn library_write_oas(handle: &LibraryHandle, path: &str) -> u8;
         fn library_cell_count(handle: &LibraryHandle) -> u64;
         fn library_cell_at(handle: &LibraryHandle, idx: u64) -> &CellHandle;
         fn library_name(handle: &LibraryHandle) -> &str;
@@ -307,12 +309,37 @@ impl Library {
     /// - Any `ErrorCode` from `gdstk::read_gds` if the bytes are not valid
     ///   GDSII (`InvalidFile`, `ChecksumError`, `UnsupportedRecord`, ...).
     pub fn from_bytes(data: &[u8]) -> Result<Self, Error> {
-        let path = TempPath::new("gdstk_rs_from_bytes", "gds")
+        Self::read_bytes_with(data, "gds", ffi::read_gds_with_error)
+    }
+
+    /// Parse an OASIS library from in-memory bytes. Same tempfile bridge as
+    /// [`Library::from_bytes`]. OASIS units are always 1 µm; the file's
+    /// precision is kept.
+    pub fn from_oas_bytes(data: &[u8]) -> Result<Self, Error> {
+        Self::read_bytes_with(data, "oas", ffi::read_oas_with_error)
+    }
+
+    /// Parse GDSII or OASIS bytes, choosing the reader by the file
+    /// signature (see [`sniff_format`]). Unknown signatures are tried as
+    /// GDSII so the error matches [`Library::from_bytes`].
+    pub fn from_bytes_any(data: &[u8]) -> Result<Self, Error> {
+        match sniff_format(data) {
+            Some(LayoutFormat::Oasis) => Self::from_oas_bytes(data),
+            _ => Self::from_bytes(data),
+        }
+    }
+
+    fn read_bytes_with(
+        data: &[u8],
+        ext: &str,
+        read: fn(&str, &mut u8) -> cxx::UniquePtr<ffi::LibraryHandle>,
+    ) -> Result<Self, Error> {
+        let path = TempPath::new("gdstk_rs_from_bytes", ext)
             .map_err(|_| Error(ErrorCode::FileError))?;
         std::fs::write(path.as_str(), data).map_err(|_| Error(ErrorCode::FileError))?;
 
         let mut code: u8 = 0;
-        let handle = ffi::read_gds_with_error(path.as_str(), &mut code);
+        let handle = read(path.as_str(), &mut code);
         let ec = ErrorCode::from_u8(code);
         if ec != ErrorCode::NoError || handle.is_null() {
             return Err(Error(ec));
@@ -357,6 +384,17 @@ impl Library {
 
     /// Write the library to a GDSII file using defaults (no fracture,
     /// current timestamp).
+    /// Write the library as OASIS (deflate level 6, no extra properties).
+    pub fn write_oas(&self, path: &str) -> Result<(), Error> {
+        let code = ffi::library_write_oas(&self.inner, path);
+        let ec = ErrorCode::from_u8(code);
+        if ec == ErrorCode::NoError {
+            Ok(())
+        } else {
+            Err(Error(ec))
+        }
+    }
+
     pub fn write_gds(&self, path: &str) -> Result<(), Error> {
         let code = ffi::library_write_gds(&self.inner, path);
         let ec = ErrorCode::from_u8(code);
@@ -1561,6 +1599,30 @@ impl Library {
     pub fn layers(&self) -> Vec<GdsTag> {
         let n = ffi::library_tag_count(&self.inner);
         (0..n).map(|i| ffi::library_tag_at(&self.inner, i)).collect()
+    }
+}
+
+// ---- Layout format detection ----
+
+/// Layout file formats readable by this crate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayoutFormat {
+    Gds,
+    Oasis,
+}
+
+/// OASIS magic bytes (SEMI P39): `%SEMI-OASIS` followed by CR LF.
+pub const OASIS_MAGIC: &[u8] = b"%SEMI-OASIS\r\n";
+
+/// Detect the format from the first bytes: OASIS magic, or a GDSII HEADER
+/// record (length 6, record type 0x0002). `None` if neither matches.
+pub fn sniff_format(data: &[u8]) -> Option<LayoutFormat> {
+    if data.starts_with(OASIS_MAGIC) {
+        Some(LayoutFormat::Oasis)
+    } else if data.starts_with(&[0x00, 0x06, 0x00, 0x02]) {
+        Some(LayoutFormat::Gds)
+    } else {
+        None
     }
 }
 
