@@ -930,3 +930,60 @@ fn xor_split_owned_matches_xor_split_flat() {
         assert!((owned_area(&flat.removed) - owned_area(&own.removed)).abs() < 1e-6, "layer {layer} removed");
     }
 }
+
+// ---- Avisos del lector: la biblioteca se lee igual ----
+
+/// Un registro GDSII: longitud, tipo, tipo de dato y contenido.
+fn gds_record(out: &mut Vec<u8>, rtype: u8, dtype: u8, data: &[u8]) {
+    let mut data = data.to_vec();
+    if data.len() % 2 == 1 {
+        data.push(0);
+    }
+    out.extend_from_slice(&((data.len() + 4) as u16).to_be_bytes());
+    out.extend_from_slice(&[rtype, dtype]);
+    out.extend_from_slice(&data);
+}
+
+/// TOP con un rectángulo en 1/0 y una SREF a `MISSING`, que no está en el
+/// archivo (una celda de otra biblioteca, típico de un stream-out parcial).
+fn gds_with_missing_reference() -> Vec<u8> {
+    let i16s = |v: &[i16]| v.iter().flat_map(|x| x.to_be_bytes()).collect::<Vec<u8>>();
+    let i32s = |v: &[i32]| v.iter().flat_map(|x| x.to_be_bytes()).collect::<Vec<u8>>();
+    // UNITS: 1e-3 y 1e-9 en el real de 8 bytes de GDSII.
+    let units = [0x3E, 0x41, 0x89, 0x37, 0x4B, 0xC6, 0xA7, 0xF0, 0x39, 0x44, 0xB8, 0x2F, 0xA0, 0x9B, 0x5A, 0x54];
+    let mut g = Vec::new();
+    gds_record(&mut g, 0x00, 0x02, &i16s(&[600])); // HEADER
+    gds_record(&mut g, 0x01, 0x02, &i16s(&[0; 12])); // BGNLIB
+    gds_record(&mut g, 0x02, 0x06, b"LIB"); // LIBNAME
+    gds_record(&mut g, 0x03, 0x05, &units); // UNITS
+    gds_record(&mut g, 0x05, 0x02, &i16s(&[0; 12])); // BGNSTR
+    gds_record(&mut g, 0x06, 0x06, b"TOP"); // STRNAME
+    gds_record(&mut g, 0x08, 0x00, &[]); // BOUNDARY
+    gds_record(&mut g, 0x0D, 0x02, &i16s(&[1])); // LAYER
+    gds_record(&mut g, 0x0E, 0x02, &i16s(&[0])); // DATATYPE
+    gds_record(&mut g, 0x10, 0x03, &i32s(&[0, 0, 1000, 0, 1000, 1000, 0, 1000, 0, 0])); // XY
+    gds_record(&mut g, 0x11, 0x00, &[]); // ENDEL
+    gds_record(&mut g, 0x0A, 0x00, &[]); // SREF
+    gds_record(&mut g, 0x12, 0x06, b"MISSING"); // SNAME
+    gds_record(&mut g, 0x10, 0x03, &i32s(&[5000, 0])); // XY
+    gds_record(&mut g, 0x11, 0x00, &[]); // ENDEL
+    gds_record(&mut g, 0x07, 0x00, &[]); // ENDSTR
+    gds_record(&mut g, 0x04, 0x00, &[]); // ENDLIB
+    g
+}
+
+#[test]
+fn a_missing_reference_is_a_warning_not_an_error() {
+    let lib = Library::from_bytes(&gds_with_missing_reference()).expect("un aviso no impide leer");
+    assert_eq!(lib.read_warning(), Some(ErrorCode::MissingReference));
+    assert!(ErrorCode::MissingReference.is_warning() && !ErrorCode::InvalidFile.is_warning());
+    let top = lib.find_cell("TOP").expect("TOP");
+    assert_eq!(top.polygon_count(), 1);
+    let r = top.references().next().expect("la referencia queda, por nombre");
+    assert_eq!(r.cell_name(), "MISSING");
+    // Aplanar ignora la referencia sin celda (no hay nada que dibujar).
+    let flat = top.get_polygons().depth(-1).build();
+    assert_eq!(flat.count(), 1);
+    // Un archivo sin avisos no tiene.
+    assert_eq!(Library::from_bytes(&std::fs::read(proof_lib_path()).unwrap()).unwrap().read_warning(), None);
+}

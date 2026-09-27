@@ -142,6 +142,6 @@ impl LibraryBuilder {
             &self.name_tags,
             &self.names,
         );
-        Library { inner }
+        Library { inner, warning: None }
     }
 }

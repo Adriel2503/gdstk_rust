@@ -303,8 +303,10 @@ std::unique_ptr<LibraryHandle> read_gds_with_error(rust::Str filename,
                                         /*shape_tags=*/nullptr,
                                         &err);
     out_error = static_cast<uint8_t>(err);
-    if (err != gdstk::ErrorCode::NoError) {
-        // Caller treats null as failure (mirrors gds_info_read).
+    // Los códigos anteriores a ChecksumError son avisos (una referencia a
+    // una celda que no está, un registro que se ignoró): la biblioteca se
+    // leyó entera. Solo un error de verdad devuelve null.
+    if (err >= gdstk::ErrorCode::ChecksumError) {
         return nullptr;
     }
     finish_load(*handle);
@@ -323,7 +325,7 @@ std::unique_ptr<LibraryHandle> read_oas_with_error(rust::Str filename,
                                         /*tolerance=*/0.0,
                                         &err);
     out_error = static_cast<uint8_t>(err);
-    if (err != gdstk::ErrorCode::NoError) {
+    if (err >= gdstk::ErrorCode::ChecksumError) {
         return nullptr;
     }
     finish_load(*handle);

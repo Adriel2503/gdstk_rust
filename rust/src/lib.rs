@@ -392,6 +392,8 @@ pub struct XorSplit {
 /// Owned handle to a parsed GDSII library.
 pub struct Library {
     inner: cxx::UniquePtr<ffi::LibraryHandle>,
+    /// Aviso del lector: la biblioteca se leyó igual (ver [`Library::read_warning`]).
+    warning: Option<ErrorCode>,
 }
 
 impl Library {
@@ -402,6 +404,7 @@ impl Library {
     pub fn open(path: &str) -> Self {
         Self {
             inner: ffi::read_gds_shim(path),
+            warning: None,
         }
     }
 
@@ -414,8 +417,12 @@ impl Library {
     ///
     /// Errors:
     /// - `ErrorCode::FileError` if the tempfile cannot be created or written.
-    /// - Any `ErrorCode` from `gdstk::read_gds` if the bytes are not valid
-    ///   GDSII (`InvalidFile`, `ChecksumError`, `UnsupportedRecord`, ...).
+    /// - An error `ErrorCode` from `gdstk::read_gds` if the bytes are not
+    ///   valid GDSII (`InvalidFile`, `ChecksumError`, ...).
+    ///
+    /// A warning (`MissingReference`, `UnsupportedRecord`, ... see
+    /// [`ErrorCode::is_warning`]) is not an error: the library is returned
+    /// and the code is kept in [`Library::read_warning`].
     pub fn from_bytes(data: &[u8]) -> Result<Self, Error> {
         Self::read_bytes_with(data, "gds", ffi::read_gds_with_error)
     }
@@ -452,12 +459,25 @@ impl Library {
 
         let mut code: u8 = 0;
         let handle = read(path.as_str(), &mut code);
-        let ec = ErrorCode::from_u8(code);
-        if ec != ErrorCode::NoError || handle.is_null() {
-            return Err(Error(ec));
+        let mut ec = ErrorCode::from_u8(code);
+        // Bytes que no son GDSII pueden leerse como una lista de registros
+        // no soportados (un aviso): sin la cabecera HEADER no es un GDSII.
+        if ext == "gds" && ec != ErrorCode::NoError && sniff_format(data) != Some(LayoutFormat::Gds) {
+            ec = ErrorCode::InvalidFile;
         }
-        Ok(Self { inner: handle })
+        if !ec.is_warning() || handle.is_null() {
+            return Err(Error(if ec == ErrorCode::NoError { ErrorCode::InvalidFile } else { ec }));
+        }
+        Ok(Self { inner: handle, warning: (ec != ErrorCode::NoError).then_some(ec) })
         // `path` drops here → tempfile removed.
+    }
+
+    /// The reader's warning, if any: the file was read, but gdstk found
+    /// something to report (a reference to a cell that is not in the file,
+    /// an unsupported record that was skipped, ...). gdstk keeps only the
+    /// last one.
+    pub fn read_warning(&self) -> Option<ErrorCode> {
+        self.warning
     }
 
     pub fn cell_count(&self) -> u64 {
@@ -1189,6 +1209,11 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
+    /// `true` for `NoError` and the warnings (1..=8): the file was read.
+    pub fn is_warning(self) -> bool {
+        (self as u8) < (Self::ChecksumError as u8)
+    }
+
     fn from_u8(n: u8) -> Self {
         match n {
             0 => Self::NoError,
@@ -1212,7 +1237,8 @@ impl ErrorCode {
         }
     }
 
-    fn as_str(self) -> &'static str {
+    /// Short English description (`"missing reference"`).
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::NoError => "no error",
             Self::BooleanError => "boolean operation error",
