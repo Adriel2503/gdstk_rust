@@ -864,3 +864,59 @@ fn from_bytes_empty_returns_error() {
         err.0
     );
 }
+
+fn owned_area(polys: &[gdstk_rs::OwnedPolygon]) -> f64 {
+    polys
+        .iter()
+        .map(|p| {
+            let n = p.points.len();
+            (0..n)
+                .map(|i| {
+                    let (a, b) = (p.points[i], p.points[(i + 1) % n]);
+                    a.x * b.y - b.x * a.y
+                })
+                .sum::<f64>()
+                .abs()
+                * 0.5
+        })
+        .sum()
+}
+
+fn square(x: f64, y: f64, s: f64) -> gdstk_rs::OwnedPolygon {
+    let p = |x, y| gdstk_rs::Point2D { x, y };
+    gdstk_rs::OwnedPolygon { layer: 1, datatype: 0, points: vec![p(x, y), p(x + s, y), p(x + s, y + s), p(x, y + s)] }
+}
+
+#[test]
+fn xor_split_owned_is_directional_and_exact() {
+    let tag = gdstk_rs::GdsTag { layer: 1, datatype: 0 };
+    // A: cuadrado 0..2; B: el mismo desplazado 1 en x. Solapan 1×2.
+    let split = gdstk_rs::xor_split_owned(&[square(0.0, 0.0, 2.0)], &[square(1.0, 0.0, 2.0)], tag);
+    assert!((owned_area(&split.added) - 2.0).abs() < 1e-9, "added = B menos A = 1×2");
+    assert!((owned_area(&split.removed) - 2.0).abs() < 1e-9, "removed = A menos B = 1×2");
+    // Vacío contra algo: todo añadido; iguales: nada.
+    let only_b = gdstk_rs::xor_split_owned(&[], &[square(0.0, 0.0, 3.0)], tag);
+    assert!((owned_area(&only_b.added) - 9.0).abs() < 1e-9 && only_b.removed.is_empty());
+    let same = gdstk_rs::xor_split_owned(&[square(0.0, 0.0, 1.0)], &[square(0.0, 0.0, 1.0)], tag);
+    assert!(same.added.is_empty() && same.removed.is_empty());
+}
+
+#[test]
+fn xor_split_owned_matches_xor_split_flat() {
+    // Los mismos poligonos por las dos APIs dan las mismas areas.
+    let lib = Library::open(&proof_lib_path());
+    let cells: Vec<_> = lib.cells().filter(|c| c.polygon_count() > 0).collect();
+    let (Some(a), Some(b)) = (cells.first(), cells.get(1)) else { return };
+    let owned = |fp: &gdstk_rs::FlattenedPolygons<'_>| -> Vec<gdstk_rs::OwnedPolygon> {
+        fp.polygons()
+            .map(|p| gdstk_rs::OwnedPolygon { layer: p.layer(), datatype: p.datatype(), points: p.points().collect() })
+            .collect()
+    };
+    for layer in 0u32..8 {
+        let (fa, fb) = (a.get_polygons().with_filter(layer, 0).build(), b.get_polygons().with_filter(layer, 0).build());
+        let flat = gdstk_rs::xor_split_flat(&fa, &fb);
+        let own = gdstk_rs::xor_split_owned(&owned(&fa), &owned(&fb), gdstk_rs::GdsTag { layer, datatype: 0 });
+        assert!((owned_area(&flat.added) - owned_area(&own.added)).abs() < 1e-6, "layer {layer} added");
+        assert!((owned_area(&flat.removed) - owned_area(&own.removed)).abs() < 1e-6, "layer {layer} removed");
+    }
+}

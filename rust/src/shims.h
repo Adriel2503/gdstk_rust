@@ -323,6 +323,15 @@ std::unique_ptr<XorSplitHandle> cell_xor_polygons_split(
 std::unique_ptr<XorSplitHandle> polygons_xor_split(
     const FlattenedPolygonsHandle& a, const FlattenedPolygonsHandle& b);
 
+// Directional XOR over polygons built by the caller (not owned by any cell):
+// `*_xy` holds x0,y0,x1,y1,... for every polygon back to back and
+// `*_counts` the number of points of each one. All polygons get the tag
+// (layer, datatype). Same semantics as polygons_xor_split.
+std::unique_ptr<XorSplitHandle> owned_xor_split(
+    rust::Slice<const double> a_xy, rust::Slice<const uint64_t> a_counts,
+    rust::Slice<const double> b_xy, rust::Slice<const uint64_t> b_counts,
+    uint32_t layer, uint32_t datatype);
+
 uint64_t xor_split_added_count(const XorSplitHandle& h);
 uint64_t xor_split_removed_count(const XorSplitHandle& h);
 

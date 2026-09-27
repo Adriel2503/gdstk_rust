@@ -1244,6 +1244,52 @@ std::unique_ptr<XorSplitHandle> polygons_xor_split(
     return handle;
 }
 
+// Builds gdstk polygons from flat coordinates; the caller frees them with
+// free_owned_polygons.
+static gdstk::Array<gdstk::Polygon*> build_owned_polygons(rust::Slice<const double> xy,
+                                                         rust::Slice<const uint64_t> counts,
+                                                         gdstk::Tag tag) {
+    gdstk::Array<gdstk::Polygon*> out = {};
+    out.ensure_slots(counts.size());
+    uint64_t offset = 0;
+    for (uint64_t n : counts) {
+        if (offset + 2 * n > xy.size()) break;  // malformed input: stop, never read past
+        gdstk::Polygon* p = (gdstk::Polygon*)gdstk::allocate_clear(sizeof(gdstk::Polygon));
+        p->tag = tag;
+        p->point_array.ensure_slots(n);
+        for (uint64_t j = 0; j < n; j++) {
+            p->point_array.append(gdstk::Vec2{xy[offset + 2 * j], xy[offset + 2 * j + 1]});
+        }
+        offset += 2 * n;
+        out.append(p);
+    }
+    return out;
+}
+
+static void free_owned_polygons(gdstk::Array<gdstk::Polygon*>& polys) {
+    for (uint64_t i = 0; i < polys.count; i++) {
+        polys[i]->clear();
+        gdstk::free_allocation(polys[i]);
+    }
+    polys.clear();
+}
+
+std::unique_ptr<XorSplitHandle> owned_xor_split(
+    rust::Slice<const double> a_xy, rust::Slice<const uint64_t> a_counts,
+    rust::Slice<const double> b_xy, rust::Slice<const uint64_t> b_counts,
+    uint32_t layer, uint32_t datatype) {
+    auto handle = std::make_unique<XorSplitHandle>();
+    const gdstk::Tag tag = gdstk::make_tag(layer, datatype);
+    gdstk::Array<gdstk::Polygon*> a = build_owned_polygons(a_xy, a_counts, tag);
+    gdstk::Array<gdstk::Polygon*> b = build_owned_polygons(b_xy, b_counts, tag);
+    // added = B \ A, removed = A \ B (matches polygons_xor_split).
+    run_boolean_not(b, a, handle->impl->added);
+    run_boolean_not(a, b, handle->impl->removed);
+    free_owned_polygons(a);
+    free_owned_polygons(b);
+    return handle;
+}
+
 uint64_t xor_split_added_count(const XorSplitHandle& h) {
     return h.impl->added.size();
 }

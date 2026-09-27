@@ -239,6 +239,15 @@ mod ffi {
             a: &FlattenedPolygonsHandle,
             b: &FlattenedPolygonsHandle,
         ) -> UniquePtr<XorSplitHandle>;
+        // Directional XOR sobre poligonos armados por el caller.
+        fn owned_xor_split(
+            a_xy: &[f64],
+            a_counts: &[u64],
+            b_xy: &[f64],
+            b_counts: &[u64],
+            layer: u32,
+            datatype: u32,
+        ) -> UniquePtr<XorSplitHandle>;
         fn xor_split_added_count(h: &XorSplitHandle) -> u64;
         fn xor_split_removed_count(h: &XorSplitHandle) -> u64;
         fn xor_split_added_layer(h: &XorSplitHandle, poly_idx: u64) -> u32;
@@ -1535,6 +1544,29 @@ impl<'a> FlattenedPolygons<'a> {
 /// FPs separadas y XOR'ealas par a par.
 pub fn xor_split_flat(a: &FlattenedPolygons<'_>, b: &FlattenedPolygons<'_>) -> XorSplit {
     let h = ffi::polygons_xor_split(&a.inner, &b.inner);
+    XorSplit {
+        added: collect_split_polys(&h, SplitSide::Added),
+        removed: collect_split_polys(&h, SplitSide::Removed),
+    }
+}
+
+/// Como [`xor_split_flat`], pero sobre poligonos propios (no de una cell):
+/// sirve para hacer el XOR solo de un subconjunto de una capa. Todos se
+/// tratan como de la capa `tag`; `added = B \ A`, `removed = A \ B`.
+pub fn xor_split_owned(a: &[OwnedPolygon], b: &[OwnedPolygon], tag: GdsTag) -> XorSplit {
+    fn flatten(polys: &[OwnedPolygon]) -> (Vec<f64>, Vec<u64>) {
+        let mut xy = Vec::with_capacity(polys.iter().map(|p| 2 * p.points.len()).sum());
+        let counts = polys.iter().map(|p| p.points.len() as u64).collect();
+        for p in polys {
+            for q in &p.points {
+                xy.push(q.x);
+                xy.push(q.y);
+            }
+        }
+        (xy, counts)
+    }
+    let ((a_xy, a_counts), (b_xy, b_counts)) = (flatten(a), flatten(b));
+    let h = ffi::owned_xor_split(&a_xy, &a_counts, &b_xy, &b_counts, tag.layer, tag.datatype);
     XorSplit {
         added: collect_split_polys(&h, SplitSide::Added),
         removed: collect_split_polys(&h, SplitSide::Removed),
