@@ -6,7 +6,7 @@
 mod common;
 
 use common::{normalize_lf, proof_lib_path, run_example};
-use gdstk_rs::{ErrorCode, GdsTag, Library, gds_info};
+use gdstk_rs::{ErrorCode, GdsTag, Library, Point2D, gds_info};
 
 // ---- Reading and metadata ----
 
@@ -986,4 +986,42 @@ fn a_missing_reference_is_a_warning_not_an_error() {
     assert_eq!(flat.count(), 1);
     // Un archivo sin avisos no tiene.
     assert_eq!(Library::from_bytes(&std::fs::read(proof_lib_path()).unwrap()).unwrap().read_warning(), None);
+}
+
+// ---- Offsets de repetición: O(1) cada uno ----
+
+#[test]
+fn a_huge_array_reference_iterates_in_linear_time() {
+    use gdstk_rs::{LibraryBuilder, Placement};
+    // 1000 × 1000 instancias: antes cada offset generaba todos (10¹² pasos).
+    let mut b = LibraryBuilder::new("L", 1e-6, 1e-9);
+    let top = b.add_cell("TOP");
+    let child = b.add_cell("C");
+    b.add_box(child, GdsTag { layer: 1, datatype: 0 }, 0.0, 0.0, 0.5, 0.5);
+    let at = Placement {
+        columns: 1000,
+        rows: 1000,
+        v1: Point2D { x: 1.0, y: 0.0 },
+        v2: Point2D { x: 0.0, y: 2.0 },
+        ..Placement::default()
+    };
+    b.add_reference(top, child, &at);
+    let lib = b.build();
+    let r = lib.find_cell("TOP").unwrap().references().next().unwrap();
+
+    let t = std::time::Instant::now();
+    let offs: Vec<Point2D> = r.repetition_offsets().collect();
+    assert!(t.elapsed().as_secs_f64() < 5.0, "{:?}", t.elapsed());
+    assert_eq!(offs.len(), 1_000_000);
+    // Mismo orden que gdstk::Repetition::get_offsets: columna por columna.
+    let at = |i: usize, j: usize| offs[i * 1000 + j];
+    assert_eq!((at(0, 0).x, at(0, 0).y), (0.0, 0.0));
+    assert_eq!((at(0, 1).x, at(0, 1).y), (0.0, 2.0));
+    assert_eq!((at(3, 7).x, at(3, 7).y), (3.0, 14.0));
+    assert_eq!((at(999, 999).x, at(999, 999).y), (999.0, 1998.0));
+    let rep: Vec<Point2D> = r.repetition().offsets().collect();
+    assert!(rep.iter().zip(&offs).all(|(a, b)| a.x == b.x && a.y == b.y));
+    // Fuera de rango: (0, 0), como antes.
+    let out = r.repetition_offset(1_000_000);
+    assert_eq!((out.x, out.y), (0.0, 0.0));
 }

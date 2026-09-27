@@ -201,22 +201,43 @@ static inline uint64_t repetition_effective_count(const gdstk::Repetition& rep) 
     return c == 0 ? 1 : c;
 }
 
-// Helper: extract the idx-th offset from a gdstk::Repetition.
-// If the repetition is None (count==0), returns (0,0) for idx==0 and
-// (0,0) otherwise. For explicit/rectangular, uses gdstk's get_offsets.
+// Helper: the idx-th offset of a gdstk::Repetition, in the same order and
+// with the same arithmetic as Repetition::get_offsets, but O(1): generating
+// every offset on each call made iterating an AREF O(n²) (a 1000×1000 array
+// froze the viewer). No repetition (count==0) or idx out of range → (0,0).
 static inline Point2D repetition_offset_at(const gdstk::Repetition& rep, uint64_t idx) {
-    if (rep.get_count() == 0) {
-        // No repetition: single instance at origin.
-        return Point2D{0.0, 0.0};
-    }
-    gdstk::Array<gdstk::Vec2> offs = {};
-    rep.get_offsets(offs);
     Point2D r{0.0, 0.0};
-    if (idx < offs.count) {
-        r.x = offs[idx].x;
-        r.y = offs[idx].y;
+    if (idx >= rep.get_count()) return r;
+    switch (rep.type) {
+        case gdstk::RepetitionType::Rectangular: {
+            const uint64_t i = idx / rep.rows, j = idx % rep.rows;
+            r.x = i * rep.spacing.x;
+            r.y = j * rep.spacing.y;
+            break;
+        }
+        case gdstk::RepetitionType::Regular: {
+            const uint64_t i = idx / rep.rows, j = idx % rep.rows;
+            const gdstk::Vec2 vi = (double)i * rep.v1;
+            r.x = vi.x + j * rep.v2.x;
+            r.y = vi.y + j * rep.v2.y;
+            break;
+        }
+        // Las formas explícitas llevan el origen (0,0) como idx 0.
+        case gdstk::RepetitionType::ExplicitX:
+            if (idx > 0) r.x = rep.coords[idx - 1];
+            break;
+        case gdstk::RepetitionType::ExplicitY:
+            if (idx > 0) r.y = rep.coords[idx - 1];
+            break;
+        case gdstk::RepetitionType::Explicit:
+            if (idx > 0) {
+                r.x = rep.offsets[idx - 1].x;
+                r.y = rep.offsets[idx - 1].y;
+            }
+            break;
+        case gdstk::RepetitionType::None:
+            break;
     }
-    offs.clear();
     return r;
 }
 
