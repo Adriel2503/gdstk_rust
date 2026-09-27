@@ -259,11 +259,49 @@ mod ffi {
         fn xor_split_removed_point_count(h: &XorSplitHandle, poly_idx: u64) -> u64;
         fn xor_split_removed_point(h: &XorSplitHandle, poly_idx: u64, point_idx: u64) -> Point2D;
 
-        // Library tag discovery (lazy-cached set of (layer, datatype)).
+        // Library tag discovery (set of (layer, datatype), computed at load).
         fn library_tag_count(handle: &LibraryHandle) -> u64;
         fn library_tag_at(handle: &LibraryHandle, idx: u64) -> GdsTag;
     }
 }
+
+// SAFETY: every function of the bridge takes these handles by shared
+// reference and only reads them, except in three places:
+// - FlexPath::to_polygons (reached when flattening, from Cell/Reference
+//   bounding_box and when writing) deletes repeated spine points first.
+//   `finish_load` (shims.cpp) does that once, in the thread that reads the
+//   file, before any handle reaches Rust; later calls find nothing to delete.
+// - The tags of Library::layers() are computed in `finish_load` too, not in a
+//   lazy cache.
+// - gdstk's Cell::get_polygons / bounding_box are not `const` in C++ but do
+//   not write to the cell (see the const_cast notes in shims.cpp).
+// gdstk keeps no global mutable state in these paths: Clipper booleans use
+// objects local to each call and allocation goes through malloc. So a
+// Library, and anything borrowed from it, can be read from several threads
+// at once; `tests/concurrency.rs` checks it against the sequential result.
+macro_rules! thread_safe_handles {
+    ($($t:ident),* $(,)?) => {
+        $(
+            unsafe impl Send for ffi::$t {}
+            unsafe impl Sync for ffi::$t {}
+        )*
+    };
+}
+thread_safe_handles!(
+    LibraryHandle,
+    CellHandle,
+    PolygonHandle,
+    LabelHandle,
+    ReferenceHandle,
+    FlexPathHandle,
+    RobustPathHandle,
+    TopLevelView,
+    GdsInfoHandle,
+    RawCellHandle,
+    RepetitionHandle,
+    FlattenedPolygonsHandle,
+    XorSplitHandle,
+);
 
 pub use ffi::{BoundingBox, GdsTag, Point2D, XorMetrics};
 
@@ -1621,13 +1659,10 @@ fn collect_split_polys(
 }
 
 impl Library {
-    /// Distinct (layer, datatype) tags found in the library's direct
-    /// polygons. Sorted ascending by `(layer, datatype)`. Cached after
-    /// the first call.
-    ///
-    /// Path elements (FlexPath / RobustPath) are not polygonized — only
-    /// pre-existing polygons contribute. This is intentionally fast for
-    /// layer discovery before iterating with `xor_polygons_split`.
+    /// Distinct (layer, datatype) tags of the library's polygons and path
+    /// elements (FlexPath / RobustPath). Sorted ascending by
+    /// `(layer, datatype)`. Computed once when the library is read, without
+    /// polygonizing paths: a layer drawn only with paths is listed too.
     pub fn layers(&self) -> Vec<GdsTag> {
         let n = ffi::library_tag_count(&self.inner);
         (0..n).map(|i| ffi::library_tag_at(&self.inner, i)).collect()

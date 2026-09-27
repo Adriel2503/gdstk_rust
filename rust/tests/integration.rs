@@ -684,7 +684,7 @@ fn xor_polygons_split_areas_match_xor_with() {
 }
 
 #[test]
-fn library_layers_matches_polygons() {
+fn library_layers_matches_polygons_and_paths() {
     use std::collections::HashSet;
 
     let lib = Library::open(&proof_lib_path());
@@ -696,6 +696,16 @@ fn library_layers_matches_polygons() {
                 layer: poly.layer(),
                 datatype: poly.datatype(),
             });
+        }
+        for fp in cell.flexpaths() {
+            for e in 0..fp.num_elements() {
+                expected.insert(GdsTag { layer: fp.element_layer(e), datatype: fp.element_datatype(e) });
+            }
+        }
+        for rp in cell.robustpaths() {
+            for e in 0..rp.num_elements() {
+                expected.insert(GdsTag { layer: rp.element_layer(e), datatype: rp.element_datatype(e) });
+            }
         }
     }
 
@@ -718,7 +728,7 @@ fn library_layers_matches_polygons() {
         );
     }
 
-    // Cached call — second invocation must yield identical result.
+    // Second invocation must yield identical result.
     let actual2 = lib.layers();
     assert_eq!(actual, actual2);
 }

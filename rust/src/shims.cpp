@@ -17,12 +17,10 @@ namespace gdstk_shim {
 // PIMPL: the actual gdstk::Library lives here, isolated from shims.h.
 struct LibraryHandle::Impl {
     gdstk::Library lib;
-    // Lazy cache for Library::layers(). Computed on first call to
-    // library_tag_count/at; never invalidated (Library is read-only after
-    // open()). `mutable` because the public shim functions take a
-    // const LibraryHandle& reference.
-    mutable std::vector<gdstk::Tag> cached_tags;
-    mutable bool tags_cached = false;
+    // Tags of the library (Library::layers()), computed once by finish_load
+    // in the reading thread. Nothing in Impl changes after that, so a
+    // LibraryHandle can be read from several threads at once.
+    std::vector<gdstk::Tag> tags;
 
     Impl() {
         lib.name = nullptr;
@@ -152,12 +150,6 @@ static inline const gdstk::Label* as_label(const LabelHandle& h) {
 static inline const gdstk::Reference* as_reference(const ReferenceHandle& h) {
     return reinterpret_cast<const gdstk::Reference*>(&h);
 }
-static inline gdstk::FlexPath* as_flexpath_mut(const FlexPathHandle& h) {
-    // to_polygons is not const-qualified on FlexPath, so we need mutable.
-    // Safe: handle is only obtained from cell's flexpath_array, and the
-    // underlying FlexPath is owned by the Library (not aliased).
-    return reinterpret_cast<gdstk::FlexPath*>(const_cast<FlexPathHandle*>(&h));
-}
 static inline const gdstk::FlexPath* as_flexpath(const FlexPathHandle& h) {
     return reinterpret_cast<const gdstk::FlexPath*>(&h);
 }
@@ -224,6 +216,51 @@ static inline Point2D repetition_offset_at(const gdstk::Repetition& rep, uint64_
 
 // ---- Library ----
 
+// Same as the private gdstk::FlexPath::remove_overlapping_points(): deletes
+// spine points closer than the tolerance to the previous one, with their
+// widths and offsets.
+static void remove_overlapping_points(gdstk::FlexPath& fp) {
+    const double tol_sq = fp.spine.tolerance * fp.spine.tolerance;
+    gdstk::Array<gdstk::Vec2>& points = fp.spine.point_array;
+    for (uint64_t i = 1; i < points.count;) {
+        if ((points[i] - points[i - 1]).length_sq() < tol_sq) {
+            points.remove(i);
+            for (uint64_t e = 0; e < fp.num_elements; e++) fp.elements[e].half_width_and_offset.remove(i);
+        } else {
+            i++;
+        }
+    }
+}
+
+// Leaves a freshly read library ready to be read from several threads:
+//
+// - FlexPath::to_polygons (reached when flattening, from bounding_box and
+//   when writing) starts with remove_overlapping_points(), which deletes
+//   repeated spine points. Running it once here means every later call finds
+//   nothing to delete and only reads.
+// - Collects the tags of every polygon and path element for
+//   library_tag_count/at, so no lazy cache is filled from const functions.
+static void finish_load(LibraryHandle& handle) {
+    std::set<gdstk::Tag> seen;
+    gdstk::Library& lib = handle.impl->lib;
+    for (uint64_t i = 0; i < lib.cell_array.count; i++) {
+        gdstk::Cell* cell = lib.cell_array[i];
+        for (uint64_t j = 0; j < cell->polygon_array.count; j++) {
+            seen.insert(cell->polygon_array[j]->tag);
+        }
+        for (uint64_t j = 0; j < cell->flexpath_array.count; j++) {
+            gdstk::FlexPath* fp = cell->flexpath_array[j];
+            remove_overlapping_points(*fp);
+            for (uint64_t e = 0; e < fp->num_elements; e++) seen.insert(fp->elements[e].tag);
+        }
+        for (uint64_t j = 0; j < cell->robustpath_array.count; j++) {
+            const gdstk::RobustPath* rp = cell->robustpath_array[j];
+            for (uint64_t e = 0; e < rp->num_elements; e++) seen.insert(rp->elements[e].tag);
+        }
+    }
+    handle.impl->tags.assign(seen.begin(), seen.end());
+}
+
 std::unique_ptr<LibraryHandle> read_gds_shim(rust::Str filename) {
     auto handle = std::make_unique<LibraryHandle>();
     std::string path(filename.data(), filename.size());
@@ -235,6 +272,7 @@ std::unique_ptr<LibraryHandle> read_gds_shim(rust::Str filename) {
                                         /*shape_tags=*/nullptr,
                                         &error_code);
     (void)error_code;
+    finish_load(*handle);
     return handle;
 }
 
@@ -254,6 +292,7 @@ std::unique_ptr<LibraryHandle> read_gds_with_error(rust::Str filename,
         // Caller treats null as failure (mirrors gds_info_read).
         return nullptr;
     }
+    finish_load(*handle);
     return handle;
 }
 
@@ -272,6 +311,7 @@ std::unique_ptr<LibraryHandle> read_oas_with_error(rust::Str filename,
     if (err != gdstk::ErrorCode::NoError) {
         return nullptr;
     }
+    finish_load(*handle);
     return handle;
 }
 
@@ -1335,28 +1375,13 @@ Point2D xor_split_removed_point(const XorSplitHandle& h, uint64_t poly_idx,
 
 // ---- Library tag discovery ----
 
-static void ensure_tags_cached(const LibraryHandle& handle) {
-    if (handle.impl->tags_cached) return;
-    std::set<gdstk::Tag> seen;
-    for (uint64_t i = 0; i < handle.impl->lib.cell_array.count; i++) {
-        const gdstk::Cell* cell = handle.impl->lib.cell_array[i];
-        for (uint64_t j = 0; j < cell->polygon_array.count; j++) {
-            seen.insert(cell->polygon_array[j]->tag);
-        }
-    }
-    handle.impl->cached_tags.assign(seen.begin(), seen.end());
-    handle.impl->tags_cached = true;
-}
-
 uint64_t library_tag_count(const LibraryHandle& handle) {
-    ensure_tags_cached(handle);
-    return handle.impl->cached_tags.size();
+    return handle.impl->tags.size();
 }
 
 GdsTag library_tag_at(const LibraryHandle& handle, uint64_t idx) {
-    ensure_tags_cached(handle);
-    if (idx >= handle.impl->cached_tags.size()) return GdsTag{0, 0};
-    gdstk::Tag t = handle.impl->cached_tags[idx];
+    if (idx >= handle.impl->tags.size()) return GdsTag{0, 0};
+    gdstk::Tag t = handle.impl->tags[idx];
     return GdsTag{gdstk::get_layer(t), gdstk::get_type(t)};
 }
 

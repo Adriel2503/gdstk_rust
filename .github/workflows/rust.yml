@@ -53,3 +53,31 @@ jobs:
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
           VCPKG_DEFAULT_TRIPLET: x64-windows-static
+
+  # La Library se lee desde varios hilos (tests/concurrency.rs). ThreadSanitizer
+  # instrumenta el Rust (con -Zbuild-std) y el C++ de gdstk (CXXFLAGS, que el
+  # crate cc toma solo). No bloquea: la libstdc++ del sistema no está
+  # instrumentada y puede dar falsos positivos.
+  tsan:
+    name: ThreadSanitizer (no bloqueante)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config zlib1g-dev libqhull-dev
+
+      - name: Concurrency tests under TSan
+        run: cargo test -Zbuild-std --target x86_64-unknown-linux-gnu --test concurrency
+        working-directory: rust
+        env:
+          RUSTFLAGS: -Zsanitizer=thread
+          CFLAGS: -fsanitize=thread
+          CXXFLAGS: -fsanitize=thread
+          TSAN_OPTIONS: halt_on_error=1

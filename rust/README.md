@@ -52,6 +52,17 @@ Paridad verificada contra Python gdstk:
 
 El plan completo vive en `../research/arquitectura/gdstk_rust_bindings_migracion.md`.
 
+### Hilos
+
+`Library` y todo lo que se toma prestado de ella (`Cell`, `Polygon`,
+`Reference`, `FlattenedPolygons`…) son `Send + Sync`: varios hilos pueden
+aplanar, pedir bboxes, capas y XOR sobre la misma librería a la vez. Para
+que eso sea cierto, al leer el archivo se hace una sola vez lo único que gdstk
+escribía después (borrar los puntos repetidos de los `FlexPath`) y se calculan
+las capas de `Library::layers()`, que incluyen las de los paths. Lo verifica
+`tests/concurrency.rs` (12 hilos contra el resultado de uno) y, en la CI, un
+job no bloqueante con ThreadSanitizer.
+
 ## Prerequisitos
 
 ### Windows
