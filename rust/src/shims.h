@@ -303,7 +303,7 @@ const PolygonHandle& flattened_polygons_at(
 
 // ---- Boolean XOR ----
 // Canonical XOR: includes polygons + paths (converted to polygons internally).
-// Correct choice for Miku diff — without this, GDS files with paths (common
+// Correct choice for Riku diff — without this, GDS files with paths (common
 // for wires/interconnects) have incomplete diffs.
 XorMetrics cell_xor_with(const CellHandle& a, const CellHandle& b, uint32_t layer);
 
@@ -322,7 +322,7 @@ std::unique_ptr<XorSplitHandle> cell_xor_polygons_split(
 // expected to have built each FlattenedPolygons with a (layer, datatype)
 // filter via Cell::get_polygons().with_filter(...) or Reference::...; this
 // shim runs gdstk::boolean directly over the underlying arrays without
-// reconstructing temporary cells. Used by Miku's hierarchical diff to XOR
+// reconstructing temporary cells. Used by Riku's hierarchical diff to XOR
 // per-(origin, layer) buckets after walking SREF/AREF.
 std::unique_ptr<XorSplitHandle> polygons_xor_split(
     const FlattenedPolygonsHandle& a, const FlattenedPolygonsHandle& b);

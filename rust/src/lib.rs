@@ -1,6 +1,6 @@
 //! Rust bindings for gdstk — Fase 5.
 //!
-//! Full GDS inspection surface for Miku: cells, polygons, labels, references,
+//! Full GDS inspection surface for Riku: cells, polygons, labels, references,
 //! and paths (FlexPath / RobustPath). Boolean XOR (`cell.xor_with`) now
 //! converts paths to polygons before the diff, so GDS files with wire paths
 //! (common in real designs) are compared correctly.
@@ -984,7 +984,7 @@ impl<'a> Reference<'a> {
 
 /// Shape of the line endings at path termini. Matches `gdstk::EndType`.
 ///
-/// `Function` means a custom C callback is set — Miku's Rust binding
+/// `Function` means a custom C callback is set — Riku's Rust binding
 /// cannot introspect it; the other fields still work.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1515,7 +1515,7 @@ impl<'a> Repetition<'a> {
 
 /// Borrowed view into a RawCell of a Library. RawCells are cells stored
 /// as raw GDSII bytes (unparsed) — typically imported external IP libraries.
-/// Miku can iterate them and see name/size but cannot inspect geometry inside.
+/// Riku can iterate them and see name/size but cannot inspect geometry inside.
 #[derive(Clone, Copy)]
 pub struct RawCell<'a> {
     handle: &'a ffi::RawCellHandle,

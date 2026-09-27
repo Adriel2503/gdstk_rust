@@ -399,7 +399,7 @@ std::unique_ptr<TopLevelView> library_top_level(const LibraryHandle& handle) {
     auto view = std::make_unique<TopLevelView>();
     gdstk::Array<gdstk::RawCell*> rawcells = {};
     handle.impl->lib.top_level(view->impl->cells, rawcells);
-    rawcells.clear();  // Miku no soporta RawCell; descartamos.
+    rawcells.clear();  // Riku no soporta RawCell; descartamos.
     return view;
 }
 
