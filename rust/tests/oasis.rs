@@ -22,8 +22,12 @@ fn summary(lib: &Library) -> BTreeMap<(String, u32, u32), (usize, f64)> {
 }
 
 fn proof_lib_as_oas() -> Vec<u8> {
+    // Un nombre por llamada: los tests corren en paralelo en el mismo proceso
+    // y uno borraría el archivo que otro está por leer.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let lib = Library::open(&proof_lib_path());
-    let path = std::env::temp_dir().join(format!("gdstk_rs_oas_test_{}.oas", std::process::id()));
+    let path = std::env::temp_dir().join(format!("gdstk_rs_oas_test_{}_{seq}.oas", std::process::id()));
     lib.write_oas(path.to_str().unwrap()).expect("write_oas");
     let bytes = std::fs::read(&path).expect("leer .oas");
     let _ = std::fs::remove_file(&path);
