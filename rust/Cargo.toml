@@ -11,6 +11,12 @@ path = "src/lib.rs"
 
 [dependencies]
 cxx = "1.0.194"
+rayon = { version = "1", optional = true }
+
+[features]
+default = ["parallel"]
+# Parse the files of a Magic hierarchy in parallel.
+parallel = ["dep:rayon"]
 
 [build-dependencies]
 cxx-build = "1.0.194"
@@ -70,3 +76,7 @@ path = "examples/gds_info_bench.rs"
 [[example]]
 name = "roundtrip"
 path = "examples/roundtrip.rs"
+
+[[example]]
+name = "mag_area"
+path = "examples/mag_area.rs"

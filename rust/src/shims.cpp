@@ -21,6 +21,9 @@ struct LibraryHandle::Impl {
     // in the reading thread. Nothing in Impl changes after that, so a
     // LibraryHandle can be read from several threads at once.
     std::vector<gdstk::Tag> tags;
+    // Layer names with one (layer, datatype) each (OASIS LAYERNAME or a
+    // Magic library), also computed by finish_load.
+    std::vector<std::pair<gdstk::Tag, std::string>> layer_names;
 
     Impl() {
         lib.name = nullptr;
@@ -259,6 +262,18 @@ static void finish_load(LibraryHandle& handle) {
         }
     }
     handle.impl->tags.assign(seen.begin(), seen.end());
+
+    handle.impl->layer_names.clear();
+    for (uint64_t i = 0; i < lib.layer_names.count; i++) {
+        const gdstk::LayerName& ln = lib.layer_names[i];
+        if (ln.type != gdstk::LayerNameType::DATA || ln.name == nullptr) continue;
+        if (ln.layer_interval.type != gdstk::OasisInterval::SingleValue ||
+            ln.type_interval.type != gdstk::OasisInterval::SingleValue) {
+            continue;
+        }
+        gdstk::Tag t = gdstk::make_tag((uint32_t)ln.layer_interval.bound_a, (uint32_t)ln.type_interval.bound_a);
+        handle.impl->layer_names.emplace_back(t, std::string(ln.name));
+    }
 }
 
 std::unique_ptr<LibraryHandle> read_gds_shim(rust::Str filename) {
@@ -1383,6 +1398,113 @@ GdsTag library_tag_at(const LibraryHandle& handle, uint64_t idx) {
     if (idx >= handle.impl->tags.size()) return GdsTag{0, 0};
     gdstk::Tag t = handle.impl->tags[idx];
     return GdsTag{gdstk::get_layer(t), gdstk::get_type(t)};
+}
+
+uint64_t library_layer_name_count(const LibraryHandle& handle) {
+    return handle.impl->layer_names.size();
+}
+
+GdsTag library_layer_name_tag(const LibraryHandle& handle, uint64_t idx) {
+    if (idx >= handle.impl->layer_names.size()) return GdsTag{0, 0};
+    gdstk::Tag t = handle.impl->layer_names[idx].first;
+    return GdsTag{gdstk::get_layer(t), gdstk::get_type(t)};
+}
+
+rust::Str library_layer_name_at(const LibraryHandle& handle, uint64_t idx) {
+    if (idx >= handle.impl->layer_names.size()) return rust::Str();
+    const std::string& n = handle.impl->layer_names[idx].second;
+    return rust::Str(n.data(), n.size());
+}
+
+// ---- Library built from Rust (LibraryBuilder) ----
+
+static char* owned_cstr(const rust::String& s) {
+    std::string tmp(s.data(), s.size());
+    return gdstk::copy_string(tmp.c_str(), NULL);
+}
+
+// Builds a whole library in one call: cells, polygons (flat coordinates),
+// references (with a Regular repetition for arrays), labels and layer
+// names. Indices out of range are skipped, never read. Ends with
+// finish_load, like the file readers, so the result can be shared between
+// threads.
+std::unique_ptr<LibraryHandle> library_from_parts(
+    rust::Str name, double unit, double precision,
+    const rust::Vec<rust::String>& cell_names,
+    rust::Slice<const PolyPart> polys, rust::Slice<const double> xy,
+    rust::Slice<const RefPart> refs,
+    rust::Slice<const LabelPart> labels, const rust::Vec<rust::String>& label_texts,
+    rust::Slice<const GdsTag> name_tags, const rust::Vec<rust::String>& layer_names) {
+    auto handle = std::make_unique<LibraryHandle>();
+    gdstk::Library& lib = handle->impl->lib;
+    std::string lib_name(name.data(), name.size());
+    lib.init(lib_name.c_str(), unit, precision);
+
+    lib.cell_array.ensure_slots(cell_names.size());
+    for (const rust::String& n : cell_names) {
+        gdstk::Cell* c = (gdstk::Cell*)gdstk::allocate_clear(sizeof(gdstk::Cell));
+        c->name = owned_cstr(n);
+        lib.cell_array.append(c);
+    }
+    const uint64_t ncells = lib.cell_array.count;
+
+    uint64_t offset = 0;
+    for (const PolyPart& pp : polys) {
+        if (offset + 2 * pp.points > xy.size()) break;
+        if (pp.cell < ncells) {
+            gdstk::Polygon* p = (gdstk::Polygon*)gdstk::allocate_clear(sizeof(gdstk::Polygon));
+            p->tag = gdstk::make_tag(pp.layer, pp.datatype);
+            p->point_array.ensure_slots(pp.points);
+            for (uint64_t j = 0; j < pp.points; j++) {
+                p->point_array.append(gdstk::Vec2{xy[offset + 2 * j], xy[offset + 2 * j + 1]});
+            }
+            lib.cell_array[pp.cell]->polygon_array.append(p);
+        }
+        offset += 2 * pp.points;
+    }
+
+    for (const RefPart& rp : refs) {
+        if (rp.cell >= ncells || rp.child >= ncells) continue;
+        gdstk::Reference* r = (gdstk::Reference*)gdstk::allocate_clear(sizeof(gdstk::Reference));
+        r->init(lib.cell_array[rp.child]);
+        r->origin = gdstk::Vec2{rp.origin.x, rp.origin.y};
+        r->rotation = rp.rotation;
+        r->x_reflection = rp.x_reflection;
+        if (rp.columns > 1 || rp.rows > 1) {
+            r->repetition.type = gdstk::RepetitionType::Regular;
+            r->repetition.columns = rp.columns;
+            r->repetition.rows = rp.rows;
+            r->repetition.v1 = gdstk::Vec2{rp.v1.x, rp.v1.y};
+            r->repetition.v2 = gdstk::Vec2{rp.v2.x, rp.v2.y};
+        }
+        lib.cell_array[rp.cell]->reference_array.append(r);
+    }
+
+    for (uint64_t i = 0; i < labels.size() && i < label_texts.size(); i++) {
+        const LabelPart& lp = labels[i];
+        if (lp.cell >= ncells) continue;
+        gdstk::Label* l = (gdstk::Label*)gdstk::allocate_clear(sizeof(gdstk::Label));
+        l->text = owned_cstr(label_texts[i]);
+        l->magnification = 1.0;
+        l->tag = gdstk::make_tag(lp.layer, lp.texttype);
+        l->origin = gdstk::Vec2{lp.origin.x, lp.origin.y};
+        l->anchor = (gdstk::Anchor)lp.anchor;
+        lib.cell_array[lp.cell]->label_array.append(l);
+    }
+
+    for (uint64_t i = 0; i < name_tags.size() && i < layer_names.size(); i++) {
+        gdstk::LayerName ln = {};
+        ln.type = gdstk::LayerNameType::DATA;
+        ln.name = owned_cstr(layer_names[i]);
+        ln.layer_interval.type = gdstk::OasisInterval::SingleValue;
+        ln.layer_interval.bound_a = name_tags[i].layer;
+        ln.type_interval.type = gdstk::OasisInterval::SingleValue;
+        ln.type_interval.bound_a = name_tags[i].datatype;
+        lib.layer_names.append(ln);
+    }
+
+    finish_load(*handle);
+    return handle;
 }
 
 }  // namespace gdstk_shim

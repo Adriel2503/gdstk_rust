@@ -16,6 +16,9 @@ struct BoundingBox;
 struct Point2D;
 struct XorMetrics;
 struct GdsTag;
+struct PolyPart;
+struct RefPart;
+struct LabelPart;
 }  // namespace gdstk_shim
 
 namespace gdstk_shim {
@@ -352,6 +355,20 @@ Point2D xor_split_removed_point(const XorSplitHandle& h, uint64_t poly_idx,
 // (paths are not polygonized — fast path discovery).
 uint64_t library_tag_count(const LibraryHandle& handle);
 GdsTag library_tag_at(const LibraryHandle& handle, uint64_t idx);
+
+// Layer names (OASIS LAYERNAME with single values, or a Magic library).
+uint64_t library_layer_name_count(const LibraryHandle& handle);
+GdsTag library_layer_name_tag(const LibraryHandle& handle, uint64_t idx);
+rust::Str library_layer_name_at(const LibraryHandle& handle, uint64_t idx);
+
+// Whole library from flat parts built in Rust (LibraryBuilder).
+std::unique_ptr<LibraryHandle> library_from_parts(
+    rust::Str name, double unit, double precision,
+    const rust::Vec<rust::String>& cell_names,
+    rust::Slice<const PolyPart> polys, rust::Slice<const double> xy,
+    rust::Slice<const RefPart> refs,
+    rust::Slice<const LabelPart> labels, const rust::Vec<rust::String>& label_texts,
+    rust::Slice<const GdsTag> name_tags, const rust::Vec<rust::String>& layer_names);
 
 }  // namespace gdstk_shim
 

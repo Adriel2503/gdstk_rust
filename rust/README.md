@@ -63,6 +63,33 @@ las capas de `Library::layers()`, que incluyen las de los paths. Lo verifica
 `tests/concurrency.rs` (12 hilos contra el resultado de uno) y, en la CI, un
 job no bloqueante con ThreadSanitizer.
 
+### Magic (`.mag`)
+
+Lector en Rust (`src/magic/`) que arma la misma `Library` que GDSII y OASIS.
+Un `.mag` tiene una celda; sus sub-celdas (`use`) viven en otros archivos, y
+el lector no sabe dónde: se los pide a una función.
+
+```rust
+use gdstk_rs::magic::{collect, Found, MagOptions};
+use gdstk_rs::Library;
+
+let top = std::fs::read("inv.mag")?;
+let sources = collect("inv", "inv.mag", top, |req| {
+    let path = format!("lib/{}.mag", req.cell);        // req.dir: directorio del `use`
+    std::fs::read(&path).ok().map(|bytes| Found { path, bytes })
+})?;
+let (lib, info) = Library::from_mag(&sources, &MagOptions { lambda_um: 0.01, ..Default::default() });
+```
+
+- **Gramática de Magic 8.3** (`database/DBio.c`): `rect`, `tri` (`nw`/`sw`/`se`/`ne`, la esquina del ángulo recto), `use` + `array` + `transform` (las 8 orientaciones), `rlabel`/`flabel` + `port`, `<< properties >>`, `<< end >>`. Donde Magic rechaza algo inofensivo (una línea en blanco entre secciones), acá queda un aviso.
+- **Unidades:** un valor del archivo es `valor · n/d` lambda (`magscale n d`); lambda la da la tecnología (`MagOptions::lambda_um`: 0,01 µm en SKY130 e IHP, 0,05 µm en GF180). Los archivos de una jerarquía pueden tener distinto `magscale`: todo va a una grilla común (`precision`), sin redondeos.
+- **Capas con nombre:** cada capa de Magic (`metal1`, `ndiffc`) pasa a un `(layer, datatype)` con `MagOptions::layer_of` (por defecto un hash estable del nombre) y el nombre queda en `Library::layer_names()` (también se escribe y se lee como LAYERNAME de OASIS). Las marcas de DRC y pistas del router (`checkpaint`, `error_*`, …) no son geometría y quedan fuera.
+- **Jerarquía:** `collect` lee nivel por nivel y parsea cada nivel en paralelo (feature `parallel`, activa por defecto). Una celda que no se encuentra queda vacía y se reporta en `MagInfo::missing`; un `use` que cierra un ciclo se descarta, como en Magic.
+- **`MagInfo`:** puertos (`port`) y propiedades de cada celda, capas y avisos.
+- **`LibraryBuilder`:** arma una `Library` desde Rust (celdas, polígonos, referencias con arreglos, etiquetas, nombres de capa) con una sola llamada al C++. Lo usa el lector de Magic; sirve para cualquier otro lector.
+
+Verificado (`tests/magic.rs`): los 9 281 `.mag` de SKY130 y GF180 se leen sin errores (57 591 celdas en sus jerarquías, 18 s), y la cantidad de polígonos y el área por capa, aplanados, son iguales a los de KLayout 0.30.12 en 8 jerarquías de los PDK (hasta 701 celdas) y en los casos de `testdata/magic` de KLayout. El ejemplo `mag_area` imprime esa comparación. Ojo: KLayout 0.30.4 y anteriores ignoran `magscale`.
+
 ## Prerequisitos
 
 ### Windows

@@ -42,6 +42,41 @@ mod ffi {
         bbox: BoundingBox,
     }
 
+    /// One polygon for `library_from_parts`: its cell, tag and number of
+    /// points (the coordinates go in a separate flat array).
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct PolyPart {
+        cell: u64,
+        layer: u32,
+        datatype: u32,
+        points: u64,
+    }
+
+    /// One reference for `library_from_parts`. `columns × rows` copies
+    /// along `v1` and `v2` when either is above 1.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct RefPart {
+        cell: u64,
+        child: u64,
+        origin: Point2D,
+        rotation: f64,
+        x_reflection: bool,
+        columns: u64,
+        rows: u64,
+        v1: Point2D,
+        v2: Point2D,
+    }
+
+    /// One label for `library_from_parts` (the text goes separately).
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct LabelPart {
+        cell: u64,
+        layer: u32,
+        texttype: u32,
+        origin: Point2D,
+        anchor: u8,
+    }
+
     unsafe extern "C++" {
         include!("gdstk-rs/src/shims.h");
 
@@ -262,6 +297,27 @@ mod ffi {
         // Library tag discovery (set of (layer, datatype), computed at load).
         fn library_tag_count(handle: &LibraryHandle) -> u64;
         fn library_tag_at(handle: &LibraryHandle, idx: u64) -> GdsTag;
+
+        // Layer names (OASIS LAYERNAME with single values, Magic).
+        fn library_layer_name_count(handle: &LibraryHandle) -> u64;
+        fn library_layer_name_tag(handle: &LibraryHandle, idx: u64) -> GdsTag;
+        fn library_layer_name_at(handle: &LibraryHandle, idx: u64) -> &str;
+
+        // Library built from Rust (LibraryBuilder).
+        #[allow(clippy::too_many_arguments)]
+        fn library_from_parts(
+            name: &str,
+            unit: f64,
+            precision: f64,
+            cell_names: &Vec<String>,
+            polys: &[PolyPart],
+            xy: &[f64],
+            refs: &[RefPart],
+            labels: &[LabelPart],
+            label_texts: &Vec<String>,
+            name_tags: &[GdsTag],
+            layer_names: &Vec<String>,
+        ) -> UniquePtr<LibraryHandle>;
     }
 }
 
@@ -304,6 +360,11 @@ thread_safe_handles!(
 );
 
 pub use ffi::{BoundingBox, GdsTag, Point2D, XorMetrics};
+
+mod builder;
+pub mod magic;
+
+pub use builder::{CellId, LibraryBuilder, Placement};
 
 /// Self-contained polygon with no lifetime to a Library. Used for diff
 /// results that must outlive the cells they came from (e.g. passing XOR
@@ -369,9 +430,13 @@ impl Library {
     /// Parse GDSII or OASIS bytes, choosing the reader by the file
     /// signature (see [`sniff_format`]). Unknown signatures are tried as
     /// GDSII so the error matches [`Library::from_bytes`].
+    ///
+    /// A Magic file is `InvalidFile` here: its sub-cells live in other
+    /// files, so it is read with [`Library::from_mag`].
     pub fn from_bytes_any(data: &[u8]) -> Result<Self, Error> {
         match sniff_format(data) {
             Some(LayoutFormat::Oasis) => Self::from_oas_bytes(data),
+            Some(LayoutFormat::Magic) => Err(Error(ErrorCode::InvalidFile)),
             _ => Self::from_bytes(data),
         }
     }
@@ -1667,6 +1732,21 @@ impl Library {
         let n = ffi::library_tag_count(&self.inner);
         (0..n).map(|i| ffi::library_tag_at(&self.inner, i)).collect()
     }
+
+    /// Names of layers, when the file gives them: OASIS LAYERNAME records
+    /// for one `(layer, datatype)`, or the Magic layer names of a library
+    /// read with [`Library::from_mag`]. In the order of the file.
+    pub fn layer_names(&self) -> Vec<(GdsTag, String)> {
+        let n = ffi::library_layer_name_count(&self.inner);
+        (0..n)
+            .map(|i| {
+                (
+                    ffi::library_layer_name_tag(&self.inner, i),
+                    ffi::library_layer_name_at(&self.inner, i).to_string(),
+                )
+            })
+            .collect()
+    }
 }
 
 // ---- Layout format detection ----
@@ -1676,18 +1756,24 @@ impl Library {
 pub enum LayoutFormat {
     Gds,
     Oasis,
+    /// Magic `.mag` (text, one cell per file). Read with
+    /// [`Library::from_mag`], which also needs the files of the sub-cells.
+    Magic,
 }
 
 /// OASIS magic bytes (SEMI P39): `%SEMI-OASIS` followed by CR LF.
 pub const OASIS_MAGIC: &[u8] = b"%SEMI-OASIS\r\n";
 
-/// Detect the format from the first bytes: OASIS magic, or a GDSII HEADER
-/// record (length 6, record type 0x0002). `None` if neither matches.
+/// Detect the format from the first bytes: OASIS magic, a GDSII HEADER
+/// record (length 6, record type 0x0002), or a first line `magic` (Magic).
+/// `None` if none matches.
 pub fn sniff_format(data: &[u8]) -> Option<LayoutFormat> {
     if data.starts_with(OASIS_MAGIC) {
         Some(LayoutFormat::Oasis)
     } else if data.starts_with(&[0x00, 0x06, 0x00, 0x02]) {
         Some(LayoutFormat::Gds)
+    } else if magic::is_mag(data) {
+        Some(LayoutFormat::Magic)
     } else {
         None
     }
