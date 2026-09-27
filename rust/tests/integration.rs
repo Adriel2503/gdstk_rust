@@ -1025,3 +1025,12 @@ fn a_huge_array_reference_iterates_in_linear_time() {
     let out = r.repetition_offset(1_000_000);
     assert_eq!((out.x, out.y), (0.0, 0.0));
 }
+
+#[test]
+fn find_cell_uses_the_name_index() {
+    let lib = Library::open(&proof_lib_path());
+    for c in lib.cells() {
+        assert_eq!(lib.find_cell(c.name()).map(|f| f.name().to_string()), Some(c.name().to_string()));
+    }
+    assert!(lib.find_cell("NO_EXISTE").is_none());
+}

@@ -398,6 +398,8 @@ pub struct Library {
     inner: cxx::UniquePtr<ffi::LibraryHandle>,
     /// Aviso del lector: la biblioteca se leyó igual (ver [`Library::read_warning`]).
     warning: Option<ErrorCode>,
+    /// Nombre → índice de celda, armado la primera vez que se busca una.
+    by_name: std::sync::OnceLock<std::collections::HashMap<String, u64>>,
 }
 
 impl Library {
@@ -409,6 +411,7 @@ impl Library {
         Self {
             inner: ffi::read_gds_shim(path),
             warning: None,
+            by_name: Default::default(),
         }
     }
 
@@ -472,7 +475,7 @@ impl Library {
         if !ec.is_warning() || handle.is_null() {
             return Err(Error(if ec == ErrorCode::NoError { ErrorCode::InvalidFile } else { ec }));
         }
-        Ok(Self { inner: handle, warning: (ec != ErrorCode::NoError).then_some(ec) })
+        Ok(Self { inner: handle, warning: (ec != ErrorCode::NoError).then_some(ec), by_name: Default::default() })
         // `path` drops here → tempfile removed.
     }
 
@@ -498,9 +501,18 @@ impl Library {
         (0..self.cell_count()).map(move |i| self.cell(i))
     }
 
-    /// Linear search for a cell by name. Returns the first match.
+    /// The cell called `name` (the first one, if the file repeats a name).
+    /// The name index is built on the first call, O(cells); then each
+    /// lookup is O(1).
     pub fn find_cell(&self, name: &str) -> Option<Cell<'_>> {
-        self.cells().find(|c| c.name() == name)
+        let index = self.by_name.get_or_init(|| {
+            let mut map = std::collections::HashMap::with_capacity(self.cell_count() as usize);
+            for (i, c) in self.cells().enumerate() {
+                map.entry(c.name().to_string()).or_insert(i as u64);
+            }
+            map
+        });
+        index.get(name).map(|&i| self.cell(i))
     }
 
     /// GDSII library name. Empty string if the library has no name set.

@@ -142,6 +142,6 @@ impl LibraryBuilder {
             &self.name_tags,
             &self.names,
         );
-        Library { inner, warning: None }
+        Library { inner, warning: None, by_name: Default::default() }
     }
 }
