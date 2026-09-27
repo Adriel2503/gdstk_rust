@@ -335,6 +335,7 @@ std::unique_ptr<XorSplitHandle> owned_xor_split(
     rust::Slice<const double> b_xy, rust::Slice<const uint64_t> b_counts,
     uint32_t layer, uint32_t datatype);
 
+uint8_t xor_split_error(const XorSplitHandle& h);
 uint64_t xor_split_added_count(const XorSplitHandle& h);
 uint64_t xor_split_removed_count(const XorSplitHandle& h);
 

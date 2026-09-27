@@ -124,6 +124,9 @@ struct XorSplitHandle::Impl {
     };
     std::vector<OwnedPoly> added;
     std::vector<OwnedPoly> removed;
+    // ErrorCode de gdstk::boolean si alguna llamada falló (0 = bien): el
+    // resultado puede estar incompleto.
+    uint8_t error = 0;
 };
 XorSplitHandle::XorSplitHandle() : impl(std::make_unique<Impl>()) {}
 XorSplitHandle::~XorSplitHandle() = default;
@@ -1237,12 +1240,13 @@ static void copy_into_owned(const gdstk::Array<gdstk::Polygon*>& result,
 
 static void run_boolean_not(const gdstk::Array<gdstk::Polygon*>& lhs,
                             const gdstk::Array<gdstk::Polygon*>& rhs,
-                            std::vector<XorSplitHandle::Impl::OwnedPoly>& dest) {
+                            std::vector<XorSplitHandle::Impl::OwnedPoly>& dest,
+                            uint8_t& error) {
     if (lhs.count == 0) return;  // empty minus anything is empty
     gdstk::Array<gdstk::Polygon*> result = {};
     gdstk::ErrorCode err = gdstk::boolean(lhs, rhs, gdstk::Operation::Not,
                                           /*scaling=*/1000.0, result);
-    (void)err;
+    if (err != gdstk::ErrorCode::NoError) error = static_cast<uint8_t>(err);
     copy_into_owned(result, dest);
     for (uint64_t i = 0; i < result.count; i++) {
         result[i]->clear();
@@ -1272,9 +1276,9 @@ std::unique_ptr<XorSplitHandle> cell_xor_polygons_split(
     auto handle = std::make_unique<XorSplitHandle>();
 
     // added = polygons in B that are not in A.
-    run_boolean_not(filtered_b, filtered_a, handle->impl->added);
+    run_boolean_not(filtered_b, filtered_a, handle->impl->added, handle->impl->error);
     // removed = polygons in A that are not in B.
-    run_boolean_not(filtered_a, filtered_b, handle->impl->removed);
+    run_boolean_not(filtered_a, filtered_b, handle->impl->removed, handle->impl->error);
 
     // Free path-derived polygons we collected.
     for (uint64_t i = 0; i < owned_temp.count; i++) {
@@ -1295,8 +1299,8 @@ std::unique_ptr<XorSplitHandle> polygons_xor_split(
     // The caller pre-filtered both FPs by (layer, datatype) when building.
     // We therefore run gdstk::boolean directly over the underlying arrays.
     // added = B \ A, removed = A \ B (matches cell_xor_polygons_split).
-    run_boolean_not(b.impl->polygons, a.impl->polygons, handle->impl->added);
-    run_boolean_not(a.impl->polygons, b.impl->polygons, handle->impl->removed);
+    run_boolean_not(b.impl->polygons, a.impl->polygons, handle->impl->added, handle->impl->error);
+    run_boolean_not(a.impl->polygons, b.impl->polygons, handle->impl->removed, handle->impl->error);
 
     return handle;
 }
@@ -1340,12 +1344,14 @@ std::unique_ptr<XorSplitHandle> owned_xor_split(
     gdstk::Array<gdstk::Polygon*> a = build_owned_polygons(a_xy, a_counts, tag);
     gdstk::Array<gdstk::Polygon*> b = build_owned_polygons(b_xy, b_counts, tag);
     // added = B \ A, removed = A \ B (matches polygons_xor_split).
-    run_boolean_not(b, a, handle->impl->added);
-    run_boolean_not(a, b, handle->impl->removed);
+    run_boolean_not(b, a, handle->impl->added, handle->impl->error);
+    run_boolean_not(a, b, handle->impl->removed, handle->impl->error);
     free_owned_polygons(a);
     free_owned_polygons(b);
     return handle;
 }
+
+uint8_t xor_split_error(const XorSplitHandle& h) { return h.impl->error; }
 
 uint64_t xor_split_added_count(const XorSplitHandle& h) {
     return h.impl->added.size();

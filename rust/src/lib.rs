@@ -283,6 +283,7 @@ mod ffi {
             layer: u32,
             datatype: u32,
         ) -> UniquePtr<XorSplitHandle>;
+        fn xor_split_error(h: &XorSplitHandle) -> u8;
         fn xor_split_added_count(h: &XorSplitHandle) -> u64;
         fn xor_split_removed_count(h: &XorSplitHandle) -> u64;
         fn xor_split_added_layer(h: &XorSplitHandle, poly_idx: u64) -> u32;
@@ -385,6 +386,9 @@ pub struct XorSplit {
     pub added: Vec<OwnedPolygon>,
     /// Polygons present in `self` but not in `other` (A \ B).
     pub removed: Vec<OwnedPolygon>,
+    /// Clipper failed in one of the boolean operations: `added`/`removed`
+    /// may be incomplete. `None` when everything went well.
+    pub error: Option<ErrorCode>,
 }
 
 // ---- Ergonomic wrappers ----
@@ -686,10 +690,7 @@ impl<'a> Cell<'a> {
     /// allocates owned geometry. Use `xor_with` for a fast scalar summary.
     pub fn xor_polygons_split(&self, other: &Cell<'_>, tag: GdsTag) -> XorSplit {
         let h = ffi::cell_xor_polygons_split(self.handle, other.handle, tag.layer, tag.datatype);
-        XorSplit {
-            added: collect_split_polys(&h, SplitSide::Added),
-            removed: collect_split_polys(&h, SplitSide::Removed),
-        }
+        split_from(&h)
     }
 
     /// Axis-aligned bounding box covering all polygons, labels, paths, and
@@ -1673,10 +1674,7 @@ impl<'a> FlattenedPolygons<'a> {
 /// FPs separadas y XOR'ealas par a par.
 pub fn xor_split_flat(a: &FlattenedPolygons<'_>, b: &FlattenedPolygons<'_>) -> XorSplit {
     let h = ffi::polygons_xor_split(&a.inner, &b.inner);
-    XorSplit {
-        added: collect_split_polys(&h, SplitSide::Added),
-        removed: collect_split_polys(&h, SplitSide::Removed),
-    }
+    split_from(&h)
 }
 
 /// Como [`xor_split_flat`], pero sobre poligonos propios (no de una cell):
@@ -1696,13 +1694,19 @@ pub fn xor_split_owned(a: &[OwnedPolygon], b: &[OwnedPolygon], tag: GdsTag) -> X
     }
     let ((a_xy, a_counts), (b_xy, b_counts)) = (flatten(a), flatten(b));
     let h = ffi::owned_xor_split(&a_xy, &a_counts, &b_xy, &b_counts, tag.layer, tag.datatype);
-    XorSplit {
-        added: collect_split_polys(&h, SplitSide::Added),
-        removed: collect_split_polys(&h, SplitSide::Removed),
-    }
+    split_from(&h)
 }
 
 // ---- Directional XOR helpers ----
+
+fn split_from(h: &cxx::UniquePtr<ffi::XorSplitHandle>) -> XorSplit {
+    let code = ErrorCode::from_u8(ffi::xor_split_error(h));
+    XorSplit {
+        added: collect_split_polys(h, SplitSide::Added),
+        removed: collect_split_polys(h, SplitSide::Removed),
+        error: (code != ErrorCode::NoError).then_some(code),
+    }
+}
 
 #[derive(Clone, Copy)]
 enum SplitSide {
