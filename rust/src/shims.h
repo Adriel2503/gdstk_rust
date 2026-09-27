@@ -153,6 +153,7 @@ uint32_t polygon_datatype(const PolygonHandle& poly);
 BoundingBox polygon_bbox(const PolygonHandle& poly);
 uint64_t polygon_point_count(const PolygonHandle& poly);
 // Individual vertex access. Returns (0,0) for idx >= point_count.
+rust::Slice<const Point2D> polygon_points(const PolygonHandle& poly);
 Point2D polygon_point_at(const PolygonHandle& poly, uint64_t idx);
 
 // ---- Label ----
@@ -336,20 +337,17 @@ std::unique_ptr<XorSplitHandle> owned_xor_split(
     uint32_t layer, uint32_t datatype);
 
 uint8_t xor_split_error(const XorSplitHandle& h);
+rust::Slice<const Point2D> xor_split_points(const XorSplitHandle& h, bool added, uint64_t poly_idx);
 uint64_t xor_split_added_count(const XorSplitHandle& h);
 uint64_t xor_split_removed_count(const XorSplitHandle& h);
 
 uint32_t xor_split_added_layer(const XorSplitHandle& h, uint64_t poly_idx);
 uint32_t xor_split_added_datatype(const XorSplitHandle& h, uint64_t poly_idx);
 uint64_t xor_split_added_point_count(const XorSplitHandle& h, uint64_t poly_idx);
-Point2D xor_split_added_point(const XorSplitHandle& h, uint64_t poly_idx,
-                              uint64_t point_idx);
 
 uint32_t xor_split_removed_layer(const XorSplitHandle& h, uint64_t poly_idx);
 uint32_t xor_split_removed_datatype(const XorSplitHandle& h, uint64_t poly_idx);
 uint64_t xor_split_removed_point_count(const XorSplitHandle& h, uint64_t poly_idx);
-Point2D xor_split_removed_point(const XorSplitHandle& h, uint64_t poly_idx,
-                                uint64_t point_idx);
 
 // Distinct (layer, datatype) tags present in the library's polygon arrays.
 // Sorted ascending; cached on first call. Iterates only direct polygons

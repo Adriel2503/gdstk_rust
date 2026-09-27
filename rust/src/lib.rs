@@ -143,6 +143,7 @@ mod ffi {
         fn polygon_datatype(poly: &PolygonHandle) -> u32;
         fn polygon_bbox(poly: &PolygonHandle) -> BoundingBox;
         fn polygon_point_count(poly: &PolygonHandle) -> u64;
+        fn polygon_points(poly: &PolygonHandle) -> &[Point2D];
         fn polygon_point_at(poly: &PolygonHandle, idx: u64) -> Point2D;
 
         // Label
@@ -284,16 +285,15 @@ mod ffi {
             datatype: u32,
         ) -> UniquePtr<XorSplitHandle>;
         fn xor_split_error(h: &XorSplitHandle) -> u8;
+        fn xor_split_points(h: &XorSplitHandle, added: bool, poly_idx: u64) -> &[Point2D];
         fn xor_split_added_count(h: &XorSplitHandle) -> u64;
         fn xor_split_removed_count(h: &XorSplitHandle) -> u64;
         fn xor_split_added_layer(h: &XorSplitHandle, poly_idx: u64) -> u32;
         fn xor_split_added_datatype(h: &XorSplitHandle, poly_idx: u64) -> u32;
         fn xor_split_added_point_count(h: &XorSplitHandle, poly_idx: u64) -> u64;
-        fn xor_split_added_point(h: &XorSplitHandle, poly_idx: u64, point_idx: u64) -> Point2D;
         fn xor_split_removed_layer(h: &XorSplitHandle, poly_idx: u64) -> u32;
         fn xor_split_removed_datatype(h: &XorSplitHandle, poly_idx: u64) -> u32;
         fn xor_split_removed_point_count(h: &XorSplitHandle, poly_idx: u64) -> u64;
-        fn xor_split_removed_point(h: &XorSplitHandle, poly_idx: u64, point_idx: u64) -> Point2D;
 
         // Library tag discovery (set of (layer, datatype), computed at load).
         fn library_tag_count(handle: &LibraryHandle) -> u64;
@@ -759,10 +759,14 @@ impl<'a> Polygon<'a> {
         ffi::polygon_point_at(self.handle, idx)
     }
 
+    /// All vertices, read in place from gdstk (one FFI call, no copy).
+    pub fn points_slice(&self) -> &'a [Point2D] {
+        ffi::polygon_points(self.handle)
+    }
+
     /// Iterator over all vertices of the polygon.
     pub fn points(&self) -> impl Iterator<Item = Point2D> + use<'a> {
-        let this = *self;
-        (0..this.point_count()).map(move |i| this.point(i))
+        self.points_slice().iter().copied()
     }
 
     /// Perímetro total (suma de longitudes de los segmentos).
@@ -1748,14 +1752,8 @@ fn collect_split_polys(
                 ffi::xor_split_removed_point_count(h, i),
             ),
         };
-        let mut points = Vec::with_capacity(point_count as usize);
-        for j in 0..point_count {
-            let p = match side {
-                SplitSide::Added => ffi::xor_split_added_point(h, i, j),
-                SplitSide::Removed => ffi::xor_split_removed_point(h, i, j),
-            };
-            points.push(p);
-        }
+        let points = ffi::xor_split_points(h, matches!(side, SplitSide::Added), i).to_vec();
+        debug_assert_eq!(points.len() as u64, point_count);
         out.push(OwnedPolygon {
             layer,
             datatype,

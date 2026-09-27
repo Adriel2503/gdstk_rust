@@ -565,6 +565,17 @@ uint64_t polygon_point_count(const PolygonHandle& poly) {
     return as_polygon(poly)->point_array.count;
 }
 
+// Point2D (cxx) y gdstk::Vec2 son dos double seguidos: los vértices se
+// pueden ver como Point2D sin copiar ni una llamada por vértice.
+static_assert(sizeof(gdstk::Vec2) == sizeof(Point2D) && alignof(gdstk::Vec2) == alignof(Point2D),
+              "gdstk::Vec2 y Point2D deben tener el mismo layout");
+
+rust::Slice<const Point2D> polygon_points(const PolygonHandle& poly) {
+    const gdstk::Polygon* p = as_polygon(poly);
+    if (p->point_array.count == 0) return {};
+    return {reinterpret_cast<const Point2D*>(p->point_array.items), p->point_array.count};
+}
+
 Point2D polygon_point_at(const PolygonHandle& poly, uint64_t idx) {
     const gdstk::Polygon* p = as_polygon(poly);
     if (idx >= p->point_array.count) {
@@ -1391,12 +1402,11 @@ uint64_t xor_split_added_point_count(const XorSplitHandle& h, uint64_t poly_idx)
     return poly_idx < h.impl->added.size()
         ? h.impl->added[poly_idx].points.size() : 0;
 }
-Point2D xor_split_added_point(const XorSplitHandle& h, uint64_t poly_idx,
-                              uint64_t point_idx) {
-    if (poly_idx >= h.impl->added.size()) return Point2D{0.0, 0.0};
-    const auto& pts = h.impl->added[poly_idx].points;
-    if (point_idx >= pts.size()) return Point2D{0.0, 0.0};
-    return pts[point_idx];
+rust::Slice<const Point2D> xor_split_points(const XorSplitHandle& h, bool added, uint64_t poly_idx) {
+    const auto& side = added ? h.impl->added : h.impl->removed;
+    if (poly_idx >= side.size() || side[poly_idx].points.empty()) return {};
+    const auto& pts = side[poly_idx].points;
+    return {pts.data(), pts.size()};
 }
 
 uint32_t xor_split_removed_layer(const XorSplitHandle& h, uint64_t poly_idx) {
@@ -1409,14 +1419,6 @@ uint64_t xor_split_removed_point_count(const XorSplitHandle& h, uint64_t poly_id
     return poly_idx < h.impl->removed.size()
         ? h.impl->removed[poly_idx].points.size() : 0;
 }
-Point2D xor_split_removed_point(const XorSplitHandle& h, uint64_t poly_idx,
-                                uint64_t point_idx) {
-    if (poly_idx >= h.impl->removed.size()) return Point2D{0.0, 0.0};
-    const auto& pts = h.impl->removed[poly_idx].points;
-    if (point_idx >= pts.size()) return Point2D{0.0, 0.0};
-    return pts[point_idx];
-}
-
 // ---- Library tag discovery ----
 
 uint64_t library_tag_count(const LibraryHandle& handle) {
