@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1 - 2026-07-10
+### Fixed
+- Typos to `RobustPath` and `FlexPath` "extended" ends.
+- Added default values to some C++ functions to fix provided examples.
+
 ## 1.0.0 - 2026-02-21
 ### Added
 - Support for layer names from/to OASIS files (#322, thanks nmz787-intel for the contribution).
