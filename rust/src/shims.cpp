@@ -1495,6 +1495,29 @@ std::unique_ptr<XorSplitHandle> owned_boolean(
     return handle;
 }
 
+std::unique_ptr<XorSplitHandle> owned_offset(
+    rust::Slice<const double> xy, rust::Slice<const uint64_t> counts,
+    double distance, uint32_t layer, uint32_t datatype) {
+    auto handle = std::make_unique<XorSplitHandle>();
+    const gdstk::Tag tag = gdstk::make_tag(layer, datatype);
+    gdstk::Array<gdstk::Polygon*> polys = build_owned_polygons(xy, counts, tag);
+    gdstk::Array<gdstk::Polygon*> result = {};
+    // Esquinas en escuadra: el `grow`/`shrink` de Magic sobre geometría
+    // Manhattan (un miter de límite 2 no se corta a 90°).
+    gdstk::ErrorCode err = gdstk::offset(polys, distance, gdstk::OffsetJoin::Miter, /*tolerance=*/2.0,
+                                         /*scaling=*/1000.0, /*use_union=*/true, result);
+    if (err != gdstk::ErrorCode::NoError) handle->impl->error = static_cast<uint8_t>(err);
+    for (uint64_t i = 0; i < result.count; i++) result[i]->tag = tag;
+    copy_into_owned(result, handle->impl->added);
+    for (uint64_t i = 0; i < result.count; i++) {
+        result[i]->clear();
+        gdstk::free_allocation(result[i]);
+    }
+    result.clear();
+    free_owned_polygons(polys);
+    return handle;
+}
+
 uint8_t xor_split_error(const XorSplitHandle& h) { return h.impl->error; }
 
 uint64_t xor_split_added_count(const XorSplitHandle& h) {

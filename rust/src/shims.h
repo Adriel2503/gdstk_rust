@@ -337,6 +337,11 @@ std::unique_ptr<XorSplitHandle> owned_boolean(
     rust::Slice<const double> a_xy, rust::Slice<const uint64_t> a_counts,
     rust::Slice<const double> b_xy, rust::Slice<const uint64_t> b_counts,
     uint8_t op, uint32_t layer, uint32_t datatype);
+// Offset of owned polygons (their union): `distance` > 0 grows them, < 0
+// shrinks them, with square corners (miter); result in "added".
+std::unique_ptr<XorSplitHandle> owned_offset(
+    rust::Slice<const double> xy, rust::Slice<const uint64_t> counts,
+    double distance, uint32_t layer, uint32_t datatype);
 std::unique_ptr<XorSplitHandle> owned_xor_split(
     rust::Slice<const double> a_xy, rust::Slice<const uint64_t> a_counts,
     rust::Slice<const double> b_xy, rust::Slice<const uint64_t> b_counts,

@@ -949,6 +949,26 @@ fn boolean_owned_does_the_four_operations() {
 }
 
 #[test]
+fn offset_owned_grows_and_shrinks_with_square_corners() {
+    use gdstk_rs::offset_owned;
+    let tag = GdsTag { layer: 9, datatype: 0 };
+    let near = |x: f64, y: f64| (x - y).abs() < 1e-6;
+    // Un cuadrado de 10 agrandado 1: 12 × 12 (esquinas en escuadra, no redondeadas).
+    let grown = offset_owned(&[square(0.0, 0.0, 10.0)], 1.0, tag).expect("Clipper");
+    assert_eq!(grown.len(), 1);
+    assert!(near(area(&grown), 144.0), "{}", area(&grown));
+    assert!(near(area(&offset_owned(&[square(0.0, 0.0, 10.0)], -1.0, tag).expect("Clipper")), 64.0));
+    // Dos cuadrados separados 1: agrandar 0,5 los une; achicar 0,5 después
+    // deja uno solo con el hueco cerrado (el `grow`/`shrink` de un pozo).
+    let two = [square(0.0, 0.0, 10.0), square(11.0, 0.0, 10.0)];
+    let closed = offset_owned(&offset_owned(&two, 0.5, tag).expect("grow"), -0.5, tag).expect("shrink");
+    assert_eq!(closed.len(), 1);
+    assert!(near(area(&closed), 210.0), "{}", area(&closed));
+    assert!(closed.iter().all(|p| (p.layer, p.datatype) == (9, 0)));
+    assert!(offset_owned(&[], 1.0, tag).expect("vacío").is_empty());
+}
+
+#[test]
 fn xor_split_owned_is_directional_and_exact() {
     let tag = gdstk_rs::GdsTag { layer: 1, datatype: 0 };
     // A: cuadrado 0..2; B: el mismo desplazado 1 en x. Solapan 1×2.

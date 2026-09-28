@@ -285,6 +285,8 @@ mod ffi {
             layer: u32,
             datatype: u32,
         ) -> UniquePtr<XorSplitHandle>;
+        // Offset (grow > 0, shrink < 0) de poligonos armados por el caller.
+        fn owned_offset(xy: &[f64], counts: &[u64], distance: f64, layer: u32, datatype: u32) -> UniquePtr<XorSplitHandle>;
         // Directional XOR sobre poligonos armados por el caller.
         fn owned_xor_split(
             a_xy: &[f64],
@@ -1760,6 +1762,21 @@ pub fn boolean_owned(a: &[OwnedPolygon], b: &[OwnedPolygon], op: BoolOp, tag: Gd
         BoolOp::Not => 3,
     };
     let h = ffi::owned_boolean(&a_xy, &a_counts, &b_xy, &b_counts, code, tag.layer, tag.datatype);
+    match ErrorCode::from_u8(ffi::xor_split_error(&h)) {
+        ErrorCode::NoError => Ok(collect_split_polys(&h, SplitSide::Added)),
+        e => Err(Error(e)),
+    }
+}
+
+/// Los polígonos (su unión) agrandados `distance` (en unidades de sus
+/// coordenadas) o achicados si es negativa, con esquinas en escuadra: el
+/// `grow`/`shrink` de las reglas de Magic. Resultado en la capa `tag`.
+pub fn offset_owned(polys: &[OwnedPolygon], distance: f64, tag: GdsTag) -> Result<Vec<OwnedPolygon>, Error> {
+    if polys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (xy, counts) = flatten_owned(polys);
+    let h = ffi::owned_offset(&xy, &counts, distance, tag.layer, tag.datatype);
     match ErrorCode::from_u8(ffi::xor_split_error(&h)) {
         ErrorCode::NoError => Ok(collect_split_polys(&h, SplitSide::Added)),
         e => Err(Error(e)),
