@@ -310,3 +310,16 @@ rust/
 ```
 
 cxx no puede exponer `Array<T>`, `Set<T>`, `Map<T>` directamente (templates C++). La capa `shims.cpp` los envuelve en APIs concretas que cxx sí entiende.
+
+## Cosas a saber
+
+Lo que costó descubrir y sigue valiendo (rescatado de la investigación inicial de Riku):
+
+- **Errores de lectura:** `Library::open` devuelve `Self`, no `Result`; un archivo que no se pudo leer bien se ve con `read_warning()` (códigos 1–8 = aviso, la `Library` sirve igual).
+- **Nombres de celda** se exponen como `&str`: un nombre que no es UTF-8 (p. ej. Windows-1252) no está cubierto. El texto de las labels, en cambio, es UTF-8 con pérdida.
+- **`Anchor` es disperso** (`v*4 + h`): los valores 3, 7 y 11 no existen; uno inválido cae en `O` sin avisar.
+- **`Repetition` sin repetición** (`None`) da cuenta 0 y sin extremos: se normaliza a 1, las dos cosas juntas.
+- **`get_polygons`** devuelve polígonos en el heap: hay que `clear()` + `free_allocation`, o pierden memoria.
+- **`Set<Tag>`** itera en orden de hash: ordenar antes de exponerlo, para que el resultado sea determinista.
+- **cxx:** `UniquePtr<T>` necesita la definición completa del tipo (PIMPL); guardas `#ifndef`, nunca `#pragma once`; no hay punteros a función (`EndType::Function` no se puede inspeccionar). El include de Clipper apunta a la carpeta padre (`external`).
+- **Tests:** siempre con al menos dos fixtures de forma distinta (solo polígonos y con muchos paths): una vez el XOR ignoró los paths en silencio.
