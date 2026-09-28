@@ -331,6 +331,12 @@ std::unique_ptr<XorSplitHandle> polygons_xor_split(
 // `*_xy` holds x0,y0,x1,y1,... for every polygon back to back and
 // `*_counts` the number of points of each one. All polygons get the tag
 // (layer, datatype). Same semantics as polygons_xor_split.
+// Boolean `op` (0 Or, 1 And, 2 Xor, 3 Not = A \ B) of owned polygons; the
+// result goes in the handle's "added" side.
+std::unique_ptr<XorSplitHandle> owned_boolean(
+    rust::Slice<const double> a_xy, rust::Slice<const uint64_t> a_counts,
+    rust::Slice<const double> b_xy, rust::Slice<const uint64_t> b_counts,
+    uint8_t op, uint32_t layer, uint32_t datatype);
 std::unique_ptr<XorSplitHandle> owned_xor_split(
     rust::Slice<const double> a_xy, rust::Slice<const uint64_t> a_counts,
     rust::Slice<const double> b_xy, rust::Slice<const uint64_t> b_counts,

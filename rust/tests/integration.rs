@@ -915,6 +915,39 @@ fn square(x: f64, y: f64, s: f64) -> gdstk_rs::OwnedPolygon {
     gdstk_rs::OwnedPolygon { layer: 1, datatype: 0, points: vec![p(x, y), p(x + s, y), p(x + s, y + s), p(x, y + s)] }
 }
 
+fn area(polys: &[gdstk_rs::OwnedPolygon]) -> f64 {
+    polys
+        .iter()
+        .map(|p| {
+            let n = p.points.len();
+            (0..n).map(|i| p.points[i].x * p.points[(i + 1) % n].y - p.points[(i + 1) % n].x * p.points[i].y).sum::<f64>().abs() / 2.0
+        })
+        .sum()
+}
+
+#[test]
+fn boolean_owned_does_the_four_operations() {
+    use gdstk_rs::{boolean_owned, BoolOp};
+    let tag = GdsTag { layer: 9, datatype: 0 };
+    // Dos cuadrados de 10 que se solapan en 5 × 10.
+    let (a, b) = ([square(0.0, 0.0, 10.0)], [square(5.0, 0.0, 10.0)]);
+    let run = |op| boolean_owned(&a, &b, op, tag).expect("Clipper");
+    let near = |x: f64, y: f64| (x - y).abs() < 1e-6;
+    assert!(near(area(&run(BoolOp::And)), 50.0));
+    assert!(near(area(&run(BoolOp::Or)), 150.0));
+    assert!(near(area(&run(BoolOp::Not)), 50.0));
+    assert!(near(area(&run(BoolOp::Xor)), 100.0));
+    assert!(run(BoolOp::And).iter().all(|p| (p.layer, p.datatype) == (9, 0)), "en la capa pedida");
+    // Una compuerta: poly vertical (0,15 de ancho) cruzando una difusión.
+    let p = |x, y| Point2D { x, y };
+    let poly = [gdstk_rs::OwnedPolygon { layer: 66, datatype: 20, points: vec![p(1.0, -0.5), p(1.15, -0.5), p(1.15, 2.0), p(1.0, 2.0)] }];
+    let diff = [gdstk_rs::OwnedPolygon { layer: 65, datatype: 20, points: vec![p(0.0, 0.0), p(2.0, 0.0), p(2.0, 0.42), p(0.0, 0.42)] }];
+    let gate = boolean_owned(&poly, &diff, BoolOp::And, tag).expect("Clipper");
+    assert_eq!(gate.len(), 1);
+    assert!(near(area(&gate), 0.15 * 0.42));
+    assert!(boolean_owned(&[], &diff, BoolOp::And, tag).expect("vacío").is_empty());
+}
+
 #[test]
 fn xor_split_owned_is_directional_and_exact() {
     let tag = gdstk_rs::GdsTag { layer: 1, datatype: 0 };

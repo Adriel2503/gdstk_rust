@@ -1464,6 +1464,37 @@ std::unique_ptr<XorSplitHandle> owned_xor_split(
     return handle;
 }
 
+std::unique_ptr<XorSplitHandle> owned_boolean(
+    rust::Slice<const double> a_xy, rust::Slice<const uint64_t> a_counts,
+    rust::Slice<const double> b_xy, rust::Slice<const uint64_t> b_counts,
+    uint8_t op, uint32_t layer, uint32_t datatype) {
+    auto handle = std::make_unique<XorSplitHandle>();
+    const gdstk::Tag tag = gdstk::make_tag(layer, datatype);
+    gdstk::Array<gdstk::Polygon*> a = build_owned_polygons(a_xy, a_counts, tag);
+    gdstk::Array<gdstk::Polygon*> b = build_owned_polygons(b_xy, b_counts, tag);
+    gdstk::Operation operation = gdstk::Operation::Or;
+    switch (op) {
+        case 1: operation = gdstk::Operation::And; break;
+        case 2: operation = gdstk::Operation::Xor; break;
+        case 3: operation = gdstk::Operation::Not; break;
+        default: break;
+    }
+    gdstk::Array<gdstk::Polygon*> result = {};
+    gdstk::ErrorCode err = gdstk::boolean(a, b, operation, /*scaling=*/1000.0, result);
+    if (err != gdstk::ErrorCode::NoError) handle->impl->error = static_cast<uint8_t>(err);
+    // gdstk::boolean devuelve polígonos sin capa: la del pedido.
+    for (uint64_t i = 0; i < result.count; i++) result[i]->tag = tag;
+    copy_into_owned(result, handle->impl->added);
+    for (uint64_t i = 0; i < result.count; i++) {
+        result[i]->clear();
+        gdstk::free_allocation(result[i]);
+    }
+    result.clear();
+    free_owned_polygons(a);
+    free_owned_polygons(b);
+    return handle;
+}
+
 uint8_t xor_split_error(const XorSplitHandle& h) { return h.impl->error; }
 
 uint64_t xor_split_added_count(const XorSplitHandle& h) {

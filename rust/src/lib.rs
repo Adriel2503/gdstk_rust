@@ -275,6 +275,16 @@ mod ffi {
             a: &FlattenedPolygonsHandle,
             b: &FlattenedPolygonsHandle,
         ) -> UniquePtr<XorSplitHandle>;
+        // Booleana sobre poligonos armados por el caller (resultado en "added").
+        fn owned_boolean(
+            a_xy: &[f64],
+            a_counts: &[u64],
+            b_xy: &[f64],
+            b_counts: &[u64],
+            op: u8,
+            layer: u32,
+            datatype: u32,
+        ) -> UniquePtr<XorSplitHandle>;
         // Directional XOR sobre poligonos armados por el caller.
         fn owned_xor_split(
             a_xy: &[f64],
@@ -1705,20 +1715,55 @@ pub fn xor_split_flat(a: &FlattenedPolygons<'_>, b: &FlattenedPolygons<'_>) -> X
 /// sirve para hacer el XOR solo de un subconjunto de una capa. Todos se
 /// tratan como de la capa `tag`; `added = B \ A`, `removed = A \ B`.
 pub fn xor_split_owned(a: &[OwnedPolygon], b: &[OwnedPolygon], tag: GdsTag) -> XorSplit {
-    fn flatten(polys: &[OwnedPolygon]) -> (Vec<f64>, Vec<u64>) {
-        let mut xy = Vec::with_capacity(polys.iter().map(|p| 2 * p.points.len()).sum());
-        let counts = polys.iter().map(|p| p.points.len() as u64).collect();
-        for p in polys {
-            for q in &p.points {
-                xy.push(q.x);
-                xy.push(q.y);
-            }
-        }
-        (xy, counts)
-    }
-    let ((a_xy, a_counts), (b_xy, b_counts)) = (flatten(a), flatten(b));
+    let ((a_xy, a_counts), (b_xy, b_counts)) = (flatten_owned(a), flatten_owned(b));
     let h = ffi::owned_xor_split(&a_xy, &a_counts, &b_xy, &b_counts, tag.layer, tag.datatype);
     split_from(&h)
+}
+
+/// Coordenadas seguidas y cantidad de puntos de cada polígono, como las
+/// recibe el shim.
+fn flatten_owned(polys: &[OwnedPolygon]) -> (Vec<f64>, Vec<u64>) {
+    let mut xy = Vec::with_capacity(polys.iter().map(|p| 2 * p.points.len()).sum());
+    let counts = polys.iter().map(|p| p.points.len() as u64).collect();
+    for p in polys {
+        for q in &p.points {
+            xy.push(q.x);
+            xy.push(q.y);
+        }
+    }
+    (xy, counts)
+}
+
+/// Operación booleana entre dos conjuntos de polígonos.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoolOp {
+    /// A ∪ B.
+    Or,
+    /// A ∩ B.
+    And,
+    /// Lo que está en uno solo.
+    Xor,
+    /// A \ B.
+    Not,
+}
+
+/// `a op b` sobre polígonos propios (Clipper, como el XOR del diff), con el
+/// resultado en la capa `tag`. Cada conjunto se toma como la unión de sus
+/// polígonos (regla de relleno no nula). `Err` si Clipper falló: el
+/// resultado podría estar incompleto.
+pub fn boolean_owned(a: &[OwnedPolygon], b: &[OwnedPolygon], op: BoolOp, tag: GdsTag) -> Result<Vec<OwnedPolygon>, Error> {
+    let ((a_xy, a_counts), (b_xy, b_counts)) = (flatten_owned(a), flatten_owned(b));
+    let code = match op {
+        BoolOp::Or => 0,
+        BoolOp::And => 1,
+        BoolOp::Xor => 2,
+        BoolOp::Not => 3,
+    };
+    let h = ffi::owned_boolean(&a_xy, &a_counts, &b_xy, &b_counts, code, tag.layer, tag.datatype);
+    match ErrorCode::from_u8(ffi::xor_split_error(&h)) {
+        ErrorCode::NoError => Ok(collect_split_polys(&h, SplitSide::Added)),
+        e => Err(Error(e)),
+    }
 }
 
 // ---- Directional XOR helpers ----
