@@ -1052,3 +1052,57 @@ fn find_cell_uses_the_name_index() {
     }
     assert!(lib.find_cell("NO_EXISTE").is_none());
 }
+
+// ---- Nombres que no son UTF-8: se escapan, no abortan ----
+
+/// Biblioteca `LIB\xE9` con una celda `A\xE9` ("Aé" en Latin-1, un cuadrado)
+/// y una `TOP` que la instancia.
+fn gds_with_latin1_names() -> Vec<u8> {
+    let i16s = |v: &[i16]| v.iter().flat_map(|x| x.to_be_bytes()).collect::<Vec<u8>>();
+    let i32s = |v: &[i32]| v.iter().flat_map(|x| x.to_be_bytes()).collect::<Vec<u8>>();
+    let units = [0x3E, 0x41, 0x89, 0x37, 0x4B, 0xC6, 0xA7, 0xF0, 0x39, 0x44, 0xB8, 0x2F, 0xA0, 0x9B, 0x5A, 0x54];
+    let mut g = Vec::new();
+    gds_record(&mut g, 0x00, 0x02, &i16s(&[600])); // HEADER
+    gds_record(&mut g, 0x01, 0x02, &i16s(&[0; 12])); // BGNLIB
+    gds_record(&mut g, 0x02, 0x06, b"LIB\xE9"); // LIBNAME
+    gds_record(&mut g, 0x03, 0x05, &units); // UNITS
+    gds_record(&mut g, 0x05, 0x02, &i16s(&[0; 12])); // BGNSTR
+    gds_record(&mut g, 0x06, 0x06, b"A\xE9"); // STRNAME
+    gds_record(&mut g, 0x08, 0x00, &[]); // BOUNDARY
+    gds_record(&mut g, 0x0D, 0x02, &i16s(&[1])); // LAYER
+    gds_record(&mut g, 0x0E, 0x02, &i16s(&[0])); // DATATYPE
+    gds_record(&mut g, 0x10, 0x03, &i32s(&[0, 0, 1000, 0, 1000, 1000, 0, 1000, 0, 0])); // XY
+    gds_record(&mut g, 0x11, 0x00, &[]); // ENDEL
+    gds_record(&mut g, 0x07, 0x00, &[]); // ENDSTR
+    gds_record(&mut g, 0x05, 0x02, &i16s(&[0; 12])); // BGNSTR
+    gds_record(&mut g, 0x06, 0x06, b"TOP"); // STRNAME
+    gds_record(&mut g, 0x0A, 0x00, &[]); // SREF
+    gds_record(&mut g, 0x12, 0x06, b"A\xE9"); // SNAME
+    gds_record(&mut g, 0x10, 0x03, &i32s(&[5000, 0])); // XY
+    gds_record(&mut g, 0x11, 0x00, &[]); // ENDEL
+    gds_record(&mut g, 0x07, 0x00, &[]); // ENDSTR
+    gds_record(&mut g, 0x04, 0x00, &[]); // ENDLIB
+    g
+}
+
+#[test]
+fn names_that_are_not_utf8_are_escaped_instead_of_aborting() {
+    let bytes = gds_with_latin1_names();
+    let lib = Library::from_bytes(&bytes).expect("un nombre en Latin-1 no impide leer");
+    assert_eq!(lib.name(), "LIB\\xE9");
+    let mut names: Vec<String> = lib.cells().map(|c| c.name().to_string()).collect();
+    names.sort();
+    assert_eq!(names, ["A\\xE9", "TOP"]);
+    let top = lib.find_cell("TOP").expect("TOP");
+    let refs: Vec<String> = top.references().map(|r| r.cell_name().to_string()).collect();
+    assert_eq!(refs, ["A\\xE9"], "la referencia sigue resuelta, con el mismo nombre");
+    assert!(lib.find_cell("A\\xE9").is_some_and(|c| c.polygon_count() == 1));
+
+    let path = std::env::temp_dir().join(format!("gdstk-rs-latin1-{}.gds", std::process::id()));
+    std::fs::write(&path, &bytes).unwrap();
+    let info = gds_info(path.to_str().unwrap()).expect("gds_info");
+    let _ = std::fs::remove_file(&path);
+    let mut names: Vec<&str> = info.cell_names().collect();
+    names.sort();
+    assert_eq!(names, ["A\\xE9", "TOP"]);
+}

@@ -139,6 +139,16 @@ fn main() {
     // Our C++ shim.
     build.file("src/shims.cpp");
 
+    // With any `rerun-if-*` line (the env vars above), Cargo only reruns this
+    // script for what is listed: without these, editing the shim or gdstk's
+    // C++ would keep linking the old objects.
+    for path in ["src/shims.cpp", "src/shims.h"] {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    for dir in [&src_dir, &include_dir, &clipper_dir] {
+        println!("cargo:rerun-if-changed={}", dir.display());
+    }
+
     // Include paths from system deps first, then gdstk/public headers.
     for include_path in &deps.include_paths {
         build.include(include_path);

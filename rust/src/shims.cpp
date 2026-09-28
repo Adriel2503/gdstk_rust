@@ -267,11 +267,87 @@ static void remove_overlapping_points(gdstk::FlexPath& fp) {
 //   nothing to delete and only reads.
 // - Collects the tags of every polygon and path element for
 //   library_tag_count/at, so no lazy cache is filled from const functions.
+// Nombres que no son UTF-8 (un GDS de otra época, en Latin-1): `rust::Str`
+// lanzaría `std::invalid_argument` al cruzar a Rust y el proceso abortaría.
+// Al leer se reescriben con cada byte inválido como `\xNN`: sigue siendo un
+// identificador único (dos nombres distintos no se confunden, como pasaría
+// con U+FFFD) y se ve qué byte era.
+
+// Largo de la secuencia UTF-8 válida que empieza en `s[i]`, o 0 si no hay
+// una (las mismas reglas que Rust: sin formas largas, sin surrogates, hasta
+// U+10FFFF).
+static size_t utf8_seq_len(const unsigned char* s, size_t n, size_t i) {
+    unsigned char c = s[i];
+    if (c < 0x80) return 1;
+    auto cont = [&](size_t k, unsigned char lo, unsigned char hi) {
+        return i + k < n && s[i + k] >= lo && s[i + k] <= hi;
+    };
+    if (c >= 0xC2 && c <= 0xDF) return cont(1, 0x80, 0xBF) ? 2 : 0;
+    if (c == 0xE0) return cont(1, 0xA0, 0xBF) && cont(2, 0x80, 0xBF) ? 3 : 0;
+    if ((c >= 0xE1 && c <= 0xEC) || c == 0xEE || c == 0xEF) return cont(1, 0x80, 0xBF) && cont(2, 0x80, 0xBF) ? 3 : 0;
+    if (c == 0xED) return cont(1, 0x80, 0x9F) && cont(2, 0x80, 0xBF) ? 3 : 0;
+    if (c == 0xF0) return cont(1, 0x90, 0xBF) && cont(2, 0x80, 0xBF) && cont(3, 0x80, 0xBF) ? 4 : 0;
+    if (c >= 0xF1 && c <= 0xF3) return cont(1, 0x80, 0xBF) && cont(2, 0x80, 0xBF) && cont(3, 0x80, 0xBF) ? 4 : 0;
+    if (c == 0xF4) return cont(1, 0x80, 0x8F) && cont(2, 0x80, 0xBF) && cont(3, 0x80, 0xBF) ? 4 : 0;
+    return 0;
+}
+
+static std::string escape_non_utf8(const char* name) {
+    const unsigned char* s = reinterpret_cast<const unsigned char*>(name);
+    size_t n = std::strlen(name);
+    std::string out;
+    out.reserve(n + 8);
+    static const char hex[] = "0123456789ABCDEF";
+    for (size_t i = 0; i < n;) {
+        size_t len = utf8_seq_len(s, n, i);
+        if (len == 0) {
+            out += "\\x";
+            out += hex[s[i] >> 4];
+            out += hex[s[i] & 0xF];
+            i++;
+        } else {
+            out.append(name + i, len);
+            i += len;
+        }
+    }
+    return out;
+}
+
+static bool is_utf8(const char* name) {
+    const unsigned char* s = reinterpret_cast<const unsigned char*>(name);
+    size_t n = std::strlen(name);
+    for (size_t i = 0; i < n;) {
+        size_t len = utf8_seq_len(s, n, i);
+        if (len == 0) return false;
+        i += len;
+    }
+    return true;
+}
+
+// Deja `name` (memoria de gdstk) en UTF-8.
+static void make_utf8(char*& name) {
+    if (name == nullptr || is_utf8(name)) return;
+    std::string fixed = escape_non_utf8(name);
+    char* fresh = static_cast<char*>(gdstk::allocate(fixed.size() + 1));
+    std::memcpy(fresh, fixed.c_str(), fixed.size() + 1);
+    gdstk::free_allocation(name);
+    name = fresh;
+}
+
 static void finish_load(LibraryHandle& handle) {
     std::set<gdstk::Tag> seen;
     gdstk::Library& lib = handle.impl->lib;
+    make_utf8(lib.name);
+    for (uint64_t i = 0; i < lib.rawcell_array.count; i++) make_utf8(lib.rawcell_array[i]->name);
     for (uint64_t i = 0; i < lib.cell_array.count; i++) {
         gdstk::Cell* cell = lib.cell_array[i];
+        make_utf8(cell->name);
+        // Las resueltas apuntan a la celda (ya corregida); las otras guardan
+        // el nombre.
+        for (uint64_t j = 0; j < cell->reference_array.count; j++) {
+            gdstk::Reference* r = cell->reference_array[j];
+            if (r->type == gdstk::ReferenceType::Name) make_utf8(r->name);
+        }
         for (uint64_t j = 0; j < cell->polygon_array.count; j++) {
             seen.insert(cell->polygon_array[j]->tag);
         }
@@ -296,7 +372,7 @@ static void finish_load(LibraryHandle& handle) {
             continue;
         }
         gdstk::Tag t = gdstk::make_tag((uint32_t)ln.layer_interval.bound_a, (uint32_t)ln.type_interval.bound_a);
-        handle.impl->layer_names.emplace_back(t, std::string(ln.name));
+        handle.impl->layer_names.emplace_back(t, escape_non_utf8(ln.name));
     }
 }
 
@@ -421,6 +497,7 @@ std::unique_ptr<GdsInfoHandle> gds_info_read(rust::Str path, uint8_t& out_error)
     auto h = std::make_unique<GdsInfoHandle>();
     std::string p(path.data(), path.size());
     gdstk::ErrorCode err = gdstk::gds_info(p.c_str(), h->impl->info);
+    for (uint64_t i = 0; i < h->impl->info.cell_names.count; i++) make_utf8(h->impl->info.cell_names[i]);
     out_error = static_cast<uint8_t>(err);
     if (err != gdstk::ErrorCode::NoError) {
         return nullptr;
