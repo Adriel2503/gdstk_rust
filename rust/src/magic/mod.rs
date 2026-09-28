@@ -35,7 +35,7 @@ mod parse;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-pub use parse::{is_mag, parse, ArraySpec, Corner, Label, LayerPaint, MagCell, ParseError, Port, Scale, Use};
+pub use parse::{is_mag, parse, ArraySpec, MAX_ARRAY_ELEMENTS, Corner, Label, LayerPaint, MagCell, ParseError, Port, Scale, Use};
 
 use crate::{Anchor, CellId, GdsTag, Library, LibraryBuilder, Placement, Point2D};
 

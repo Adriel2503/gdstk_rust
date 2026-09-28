@@ -96,8 +96,8 @@ mod ffi {
 
         // Library
         fn read_gds_shim(filename: &str) -> UniquePtr<LibraryHandle>;
-        fn read_gds_with_error(filename: &str, out_error: &mut u8) -> UniquePtr<LibraryHandle>;
-        fn read_oas_with_error(filename: &str, out_error: &mut u8) -> UniquePtr<LibraryHandle>;
+        fn read_gds_with_error(filename: &str, unit: f64, out_error: &mut u8) -> UniquePtr<LibraryHandle>;
+        fn read_oas_with_error(filename: &str, unit: f64, out_error: &mut u8) -> UniquePtr<LibraryHandle>;
         fn library_write_oas(handle: &LibraryHandle, path: &str) -> u8;
         fn library_cell_count(handle: &LibraryHandle) -> u64;
         fn library_cell_at(handle: &LibraryHandle, idx: u64) -> &CellHandle;
@@ -431,14 +431,14 @@ impl Library {
     /// [`ErrorCode::is_warning`]) is not an error: the library is returned
     /// and the code is kept in [`Library::read_warning`].
     pub fn from_bytes(data: &[u8]) -> Result<Self, Error> {
-        Self::read_bytes_with(data, "gds", ffi::read_gds_with_error)
+        Self::read_bytes_with(data, "gds", 0.0, ffi::read_gds_with_error)
     }
 
     /// Parse an OASIS library from in-memory bytes. Same tempfile bridge as
     /// [`Library::from_bytes`]. OASIS units are always 1 µm; the file's
     /// precision is kept.
     pub fn from_oas_bytes(data: &[u8]) -> Result<Self, Error> {
-        Self::read_bytes_with(data, "oas", ffi::read_oas_with_error)
+        Self::read_bytes_with(data, "oas", 0.0, ffi::read_oas_with_error)
     }
 
     /// Parse GDSII or OASIS bytes, choosing the reader by the file
@@ -448,24 +448,32 @@ impl Library {
     /// A Magic file is `InvalidFile` here: its sub-cells live in other
     /// files, so it is read with [`Library::from_mag`].
     pub fn from_bytes_any(data: &[u8]) -> Result<Self, Error> {
+        Self::from_bytes_any_in_unit(data, 0.0)
+    }
+
+    /// Like [`Library::from_bytes_any`], with the geometry rescaled to the
+    /// user unit `unit` (meters; `0.0` keeps the file's). Two libraries in
+    /// the same unit have comparable coordinates.
+    pub fn from_bytes_any_in_unit(data: &[u8], unit: f64) -> Result<Self, Error> {
         match sniff_format(data) {
-            Some(LayoutFormat::Oasis) => Self::from_oas_bytes(data),
+            Some(LayoutFormat::Oasis) => Self::read_bytes_with(data, "oas", unit, ffi::read_oas_with_error),
             Some(LayoutFormat::Magic) => Err(Error(ErrorCode::InvalidFile)),
-            _ => Self::from_bytes(data),
+            _ => Self::read_bytes_with(data, "gds", unit, ffi::read_gds_with_error),
         }
     }
 
     fn read_bytes_with(
         data: &[u8],
         ext: &str,
-        read: fn(&str, &mut u8) -> cxx::UniquePtr<ffi::LibraryHandle>,
+        unit: f64,
+        read: fn(&str, f64, &mut u8) -> cxx::UniquePtr<ffi::LibraryHandle>,
     ) -> Result<Self, Error> {
         let path = TempPath::new("gdstk_rs_from_bytes", ext)
             .map_err(|_| Error(ErrorCode::FileError))?;
         std::fs::write(path.as_str(), data).map_err(|_| Error(ErrorCode::FileError))?;
 
         let mut code: u8 = 0;
-        let handle = read(path.as_str(), &mut code);
+        let handle = read(path.as_str(), unit, &mut code);
         let mut ec = ErrorCode::from_u8(code);
         // Bytes que no son GDSII pueden leerse como una lista de registros
         // no soportados (un aviso): sin la cabecera HEADER no es un GDSII.

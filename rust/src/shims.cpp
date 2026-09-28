@@ -315,14 +315,17 @@ std::unique_ptr<LibraryHandle> read_gds_shim(rust::Str filename) {
     return handle;
 }
 
+// `unit` > 0 rescales the geometry to that user unit (gdstk does it while
+// reading); 0 keeps the file's.
 std::unique_ptr<LibraryHandle> read_gds_with_error(rust::Str filename,
+                                                   double unit,
                                                    uint8_t& out_error) {
     auto handle = std::make_unique<LibraryHandle>();
     std::string path(filename.data(), filename.size());
 
     gdstk::ErrorCode err = gdstk::ErrorCode::NoError;
     handle->impl->lib = gdstk::read_gds(path.c_str(),
-                                        /*unit=*/0.0,
+                                        unit,
                                         /*tolerance=*/0.0,
                                         /*shape_tags=*/nullptr,
                                         &err);
@@ -338,6 +341,7 @@ std::unique_ptr<LibraryHandle> read_gds_with_error(rust::Str filename,
 }
 
 std::unique_ptr<LibraryHandle> read_oas_with_error(rust::Str filename,
+                                                   double unit,
                                                    uint8_t& out_error) {
     auto handle = std::make_unique<LibraryHandle>();
     std::string path(filename.data(), filename.size());
@@ -345,7 +349,7 @@ std::unique_ptr<LibraryHandle> read_oas_with_error(rust::Str filename,
     gdstk::ErrorCode err = gdstk::ErrorCode::NoError;
     // unit=0: conserva la unidad del archivo (OASIS siempre usa 1 µm).
     handle->impl->lib = gdstk::read_oas(path.c_str(),
-                                        /*unit=*/0.0,
+                                        unit,
                                         /*tolerance=*/0.0,
                                         &err);
     out_error = static_cast<uint8_t>(err);

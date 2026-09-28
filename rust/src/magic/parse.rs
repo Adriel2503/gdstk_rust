@@ -75,6 +75,11 @@ pub struct LayerPaint {
     pub tris: Vec<([i64; 4], Corner)>,
 }
 
+/// Most elements one `array` may have. Flattening makes a copy of the child
+/// per element, so a typo (`array 0 999999999 …`) would exhaust memory; real
+/// arrays (an SRAM bit array) stay far below this.
+pub const MAX_ARRAY_ELEMENTS: u64 = 100_000_000;
+
 /// `array xlo xhi xsep ylo yhi ysep`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ArraySpec {
@@ -88,10 +93,10 @@ pub struct ArraySpec {
 
 impl ArraySpec {
     pub fn columns(&self) -> u64 {
-        self.xhi.abs_diff(self.xlo) + 1
+        self.xhi.abs_diff(self.xlo).saturating_add(1)
     }
     pub fn rows(&self) -> u64 {
-        self.yhi.abs_diff(self.ylo) + 1
+        self.yhi.abs_diff(self.ylo).saturating_add(1)
     }
     /// Step between columns, in file units of the parent. Magic walks from
     /// `xlo` to `xhi`, so a reversed range steps backwards (DBcellbox.c).
@@ -483,7 +488,14 @@ impl Parser {
             match key {
                 "array" => {
                     let v = ints(6)?;
-                    array = Some(ArraySpec { xlo: v[0], xhi: v[1], xsep: v[2], ylo: v[3], yhi: v[4], ysep: v[5] });
+                    let a = ArraySpec { xlo: v[0], xhi: v[1], xsep: v[2], ylo: v[3], yhi: v[4], ysep: v[5] };
+                    if a.columns().checked_mul(a.rows()).is_none_or(|n| n > MAX_ARRAY_ELEMENTS) {
+                        return Err(err(
+                            no,
+                            format!("array of {} × {} elements is over the limit ({MAX_ARRAY_ELEMENTS})", a.columns(), a.rows()),
+                        ));
+                    }
+                    array = Some(a);
                 }
                 "transform" => {
                     let v = ints(6)?;
@@ -644,6 +656,17 @@ box 0 0 1 1
         assert_eq!((a.columns(), a.rows(), a.x_step(), a.y_step()), (4, 3, 50, -40));
         assert_eq!((c.uses[2].id.as_str(), c.uses[3].id.as_str()), ("nand_0", "nand_1"));
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
+    }
+
+    #[test]
+    fn huge_arrays_are_an_error_not_an_allocation() {
+        let use_with = |array: &str| format!("magic\nuse a\n{array}\ntransform 1 0 0 0 1 0\nbox 0 0 1 1\n");
+        let e = parse(use_with("array 0 999999999 10 0 999999999 10").as_bytes()).unwrap_err();
+        assert_eq!(e.line, 3);
+        assert!(parse(use_with(&format!("array {} {} 1 0 0 1", i64::MIN, i64::MAX)).as_bytes()).is_err(), "overflow");
+        let c = parse(use_with("array 0 9999 1 0 9999 1").as_bytes()).unwrap();
+        let a = c.uses[0].array.unwrap();
+        assert_eq!(a.columns() * a.rows(), MAX_ARRAY_ELEMENTS, "the limit itself is allowed");
     }
 
     #[test]

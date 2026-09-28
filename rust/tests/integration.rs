@@ -766,6 +766,24 @@ fn from_bytes_matches_open() {
 }
 
 #[test]
+fn from_bytes_in_unit_rescales_the_geometry() {
+    let bytes = std::fs::read(proof_lib_path()).expect("could not read fixture");
+    let lib = Library::from_bytes(&bytes).expect("valid GDS");
+    // A tenth of the file's unit: every coordinate is ten times larger.
+    let unit = lib.unit() / 10.0;
+    let scaled = Library::from_bytes_any_in_unit(&bytes, unit).expect("valid GDS");
+    assert!((scaled.unit() - unit).abs() < 1e-18);
+    for cell in lib.cells() {
+        let (a, b) = (cell.bbox(), scaled.find_cell(cell.name()).expect("same cells").bbox());
+        for (x, y) in [(a.min_x, b.min_x), (a.min_y, b.min_y), (a.max_x, b.max_x), (a.max_y, b.max_y)] {
+            assert!((x * 10.0 - y).abs() < 1e-6 * x.abs().max(1.0), "cell '{}': {x} → {y}", cell.name());
+        }
+    }
+    let same = Library::from_bytes_any_in_unit(&bytes, 0.0).expect("valid GDS");
+    assert!((same.unit() - lib.unit()).abs() < 1e-18, "0 keeps the file's unit");
+}
+
+#[test]
 fn from_bytes_invalid_returns_error() {
     let result = Library::from_bytes(b"NOT_A_VALID_GDS_FILE_AT_ALL_JUST_ASCII_BYTES");
     let err = match result {
